@@ -60,7 +60,9 @@ func DefaultPath() string {
 
 // Open opens chat.db read-only with sensible pragmas for concurrent access.
 func Open(ctx context.Context, path string) (*sql.DB, error) {
-	dsn := fmt.Sprintf("file:%s?_pragma=busy_timeout(5000)&mode=ro&immutable=1", filepath.Clean(path))
+	// Note: Do NOT use immutable=1 here - it caches the database state and
+	// prevents seeing new messages (especially threaded replies) added after connection.
+	dsn := fmt.Sprintf("file:%s?_pragma=busy_timeout(5000)&mode=ro", filepath.Clean(path))
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, enhanceError(err, path)

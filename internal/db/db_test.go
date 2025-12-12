@@ -3,6 +3,9 @@ package db
 import (
 	"context"
 	"database/sql"
+	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -95,7 +98,20 @@ func newTestDBWithBody(t *testing.T) *sql.DB {
 	return db
 }
 
+func newTempDiskDB(t *testing.T) (string, func()) {
+	t.Helper()
+	f, err := os.CreateTemp("", "imsg-disk-*.db")
+	if err != nil {
+		t.Fatalf("CreateTemp: %v", err)
+	}
+	path := f.Name()
+	_ = f.Close()
+	cleanup := func() { _ = os.Remove(path) }
+	return path, cleanup
+}
+
 func bodyBlob(s string) []byte {
+
 	return append(append([]byte{0x01, 0x2b}, []byte(s)...), 0x86, 0x84)
 }
 
@@ -104,6 +120,51 @@ func boolToInt(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+func TestOpenSeesLiveUpdates(t *testing.T) {
+	ctx := context.Background()
+	path, cleanup := newTempDiskDB(t)
+	defer cleanup()
+
+	writer, err := sql.Open("sqlite", fmt.Sprintf("file:%s?_pragma=busy_timeout(5000)&mode=rwc", filepath.Clean(path)))
+	if err != nil {
+		t.Fatalf("open writer: %v", err)
+	}
+	defer func() { _ = writer.Close() }()
+
+	if _, err := writer.Exec(`CREATE TABLE message (ROWID INTEGER PRIMARY KEY, text TEXT)`); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+	if _, err := writer.Exec(`INSERT INTO message(text) VALUES ('first')`); err != nil {
+		t.Fatalf("insert first: %v", err)
+	}
+
+	reader, err := Open(ctx, path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = reader.Close() }()
+
+	count := func(db *sql.DB) int {
+		var c int
+		if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM message").Scan(&c); err != nil {
+			t.Fatalf("count: %v", err)
+		}
+		return c
+	}
+
+	if got := count(reader); got != 1 {
+		t.Fatalf("expected initial count 1, got %d", got)
+	}
+
+	if _, err := writer.Exec(`INSERT INTO message(text) VALUES ('second')`); err != nil {
+		t.Fatalf("insert second: %v", err)
+	}
+
+	if got := count(reader); got != 2 {
+		t.Fatalf("expected reader to see new rows, got %d", got)
+	}
 }
 
 func TestListChats(t *testing.T) {
