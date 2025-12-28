@@ -3,23 +3,58 @@ import Foundation
 enum TypedStreamParser {
   static func parseAttributedBody(_ data: Data) -> String {
     guard !data.isEmpty else { return "" }
-    var bytes = [UInt8](data)
+    let bytes = [UInt8](data)
     let start = [UInt8(0x01), UInt8(0x2b)]
     let end = [UInt8(0x86), UInt8(0x84)]
+    var best = ""
 
-    if let startIndex = bytes.firstIndex(of: start[0]) {
-      if startIndex + 1 < bytes.count, bytes[startIndex + 1] == start[1] {
-        bytes = Array(bytes[(startIndex + 2)...])
+    var index = 0
+    while index + 1 < bytes.count {
+      if bytes[index] == start[0], bytes[index + 1] == start[1] {
+        let sliceStart = index + 2
+        if let sliceEnd = findSequence(end, in: bytes, from: sliceStart) {
+          var segment = Array(bytes[sliceStart..<sliceEnd])
+          if segment.count > 1, segment[0] == UInt8(segment.count - 1) {
+            segment.removeFirst()
+          }
+          let candidate = String(decoding: segment, as: UTF8.self)
+            .trimmingLeadingControlCharacters()
+          if candidate.count > best.count {
+            best = candidate
+          }
+        }
       }
+      index += 1
     }
-    if let endIndex = bytes.firstIndex(of: end[0]) {
-      if endIndex + 1 < bytes.count, bytes[endIndex + 1] == end[1] {
-        bytes = Array(bytes[..<endIndex])
-      }
+
+    if !best.isEmpty {
+      return best
     }
 
     let text = String(decoding: bytes, as: UTF8.self)
     return text.trimmingLeadingControlCharacters()
+  }
+
+  private static func findSequence(_ needle: [UInt8], in haystack: [UInt8], from start: Int)
+    -> Int?
+  {
+    guard !needle.isEmpty else { return nil }
+    guard start >= 0, start < haystack.count else { return nil }
+    let limit = haystack.count - needle.count
+    if limit < start { return nil }
+    var index = start
+    while index <= limit {
+      var matched = true
+      for offset in 0..<needle.count {
+        if haystack[index + offset] != needle[offset] {
+          matched = false
+          break
+        }
+      }
+      if matched { return index }
+      index += 1
+    }
+    return nil
   }
 }
 

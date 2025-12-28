@@ -10,6 +10,7 @@
 - fix: ship PhoneNumberKit resource bundle for CLI installs
 - fix: embed Info.plist + AppleEvents entitlement for automation prompts
 - fix: fall back to osascript when AppleEvents permission is missing
+- fix: decode length-prefixed attributed bodies for sent messages
 - chore: SwiftLint + swift-format linting
 - change: JSON attachment keys now snake_case
 - deprecation note: `--interval` replaced by `--debounce` (no compatibility)
