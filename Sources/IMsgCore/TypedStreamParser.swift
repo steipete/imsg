@@ -14,7 +14,8 @@ enum TypedStreamParser {
         let sliceStart = index + 2
         if let sliceEnd = findSequence(end, in: bytes, from: sliceStart) {
           var segment = Array(bytes[sliceStart..<sliceEnd])
-          if segment.count > 1, segment[0] == UInt8(segment.count - 1) {
+          // Check if first byte equals length prefix (convert byte to Int for comparison)
+          if segment.count > 1, Int(segment[0]) == segment.count - 1 {
             segment.removeFirst()
           }
           let candidate = String(decoding: segment, as: UTF8.self)
