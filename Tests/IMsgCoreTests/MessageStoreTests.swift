@@ -390,7 +390,8 @@ func longRepeatedPatternMessage() throws {
   // Create message with repeated pattern like "aaaaaaaaaaaa aaaaaaaaaaaa ..."
   // This pattern triggers the UInt8 overflow bug in TypedStreamParser when segment > 256 bytes
   let pattern = "aaaaaaaaaaaa "
-  let longText = String(repeating: pattern, count: 100) // Creates a message > 1300 bytes
+  // Creates a message > 1300 bytes
+  let longText = String(repeating: pattern, count: 100)
   let bodyBytes = [UInt8(0x01), UInt8(0x2b)] + Array(longText.utf8) + [0x86, 0x84]
   let body = Blob(bytes: bodyBytes)
   try db.run(

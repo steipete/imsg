@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- fix: avoid crash parsing long attributed bodies (>256 bytes)
 
 ## 0.2.0 - 2025-12-28
 - feat: Swift 6 rewrite with reusable IMsgCore library target
