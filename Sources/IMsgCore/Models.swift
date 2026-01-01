@@ -2,27 +2,46 @@ import Foundation
 
 /// The type of reaction on an iMessage.
 /// Values correspond to the `associated_message_type` column in the Messages database.
-public enum ReactionType: Int, Sendable, Equatable, CaseIterable {
-  case love = 2000
-  case like = 2001
-  case dislike = 2002
-  case laugh = 2003
-  case emphasis = 2004
-  case question = 2005
+/// Standard tapbacks are 2000-2005, custom emoji reactions are 2006.
+public enum ReactionType: Sendable, Equatable {
+  case love
+  case like
+  case dislike
+  case laugh
+  case emphasis
+  case question
+  case custom(String)
 
-  /// Returns the reaction type for a removal (values 3000-3005)
-  public static func fromRemoval(_ value: Int) -> ReactionType? {
-    return ReactionType(rawValue: value - 1000)
+  /// Initialize from the database associated_message_type value
+  /// For custom emojis (2006), pass the emoji string extracted from the message text
+  public init?(rawValue: Int, customEmoji: String? = nil) {
+    switch rawValue {
+    case 2000: self = .love
+    case 2001: self = .like
+    case 2002: self = .dislike
+    case 2003: self = .laugh
+    case 2004: self = .emphasis
+    case 2005: self = .question
+    case 2006:
+      guard let emoji = customEmoji else { return nil }
+      self = .custom(emoji)
+    default: return nil
+    }
   }
 
-  /// Whether this associated_message_type represents adding a reaction (2000-2005)
+  /// Returns the reaction type for a removal (values 3000-3006)
+  public static func fromRemoval(_ value: Int, customEmoji: String? = nil) -> ReactionType? {
+    return ReactionType(rawValue: value - 1000, customEmoji: customEmoji)
+  }
+
+  /// Whether this associated_message_type represents adding a reaction (2000-2006)
   public static func isReactionAdd(_ value: Int) -> Bool {
-    return value >= 2000 && value <= 2005
+    return value >= 2000 && value <= 2006
   }
 
-  /// Whether this associated_message_type represents removing a reaction (3000-3005)
+  /// Whether this associated_message_type represents removing a reaction (3000-3006)
   public static func isReactionRemove(_ value: Int) -> Bool {
-    return value >= 3000 && value <= 3005
+    return value >= 3000 && value <= 3006
   }
 
   /// Human-readable name for the reaction
@@ -34,6 +53,7 @@ public enum ReactionType: Int, Sendable, Equatable, CaseIterable {
     case .laugh: return "laugh"
     case .emphasis: return "emphasis"
     case .question: return "question"
+    case .custom: return "custom"
     }
   }
 
@@ -46,6 +66,7 @@ public enum ReactionType: Int, Sendable, Equatable, CaseIterable {
     case .laugh: return "😂"
     case .emphasis: return "‼️"
     case .question: return "❓"
+    case .custom(let emoji): return emoji
     }
   }
 }

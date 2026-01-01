@@ -465,11 +465,12 @@ func reactionsForMessageReturnsReactions() throws {
   try db.run("INSERT INTO chat_message_join(chat_id, message_id) VALUES (1, 1)")
 
   // Insert reactions to the message
+  // associated_message_guid format is "p:X/GUID" where X is the part index
   // Love reaction from +456
   try db.run(
     """
     INSERT INTO message(ROWID, handle_id, text, guid, associated_message_guid, associated_message_type, date, is_from_me, service)
-    VALUES (2, 2, '', 'reaction-guid-1', 'msg-guid-1', 2000, ?, 0, 'iMessage')
+    VALUES (2, 2, '', 'reaction-guid-1', 'p:0/msg-guid-1', 2000, ?, 0, 'iMessage')
     """,
     TestDatabase.appleEpoch(now.addingTimeInterval(-500))
   )
@@ -477,7 +478,7 @@ func reactionsForMessageReturnsReactions() throws {
   try db.run(
     """
     INSERT INTO message(ROWID, handle_id, text, guid, associated_message_guid, associated_message_type, date, is_from_me, service)
-    VALUES (3, 1, '', 'reaction-guid-2', 'msg-guid-1', 2001, ?, 1, 'iMessage')
+    VALUES (3, 1, '', 'reaction-guid-2', 'p:0/msg-guid-1', 2001, ?, 1, 'iMessage')
     """,
     TestDatabase.appleEpoch(now.addingTimeInterval(-400))
   )
@@ -485,15 +486,23 @@ func reactionsForMessageReturnsReactions() throws {
   try db.run(
     """
     INSERT INTO message(ROWID, handle_id, text, guid, associated_message_guid, associated_message_type, date, is_from_me, service)
-    VALUES (4, 2, '', 'reaction-guid-3', 'msg-guid-1', 2003, ?, 0, 'iMessage')
+    VALUES (4, 2, '', 'reaction-guid-3', 'p:0/msg-guid-1', 2003, ?, 0, 'iMessage')
     """,
     TestDatabase.appleEpoch(now.addingTimeInterval(-300))
+  )
+  // Custom emoji reaction (type 2006) from +456
+  try db.run(
+    """
+    INSERT INTO message(ROWID, handle_id, text, guid, associated_message_guid, associated_message_type, date, is_from_me, service)
+    VALUES (5, 2, 'Reacted 🎉 to "Hello world"', 'reaction-guid-4', 'p:0/msg-guid-1', 2006, ?, 0, 'iMessage')
+    """,
+    TestDatabase.appleEpoch(now.addingTimeInterval(-200))
   )
 
   let store = try MessageStore(connection: db, path: ":memory:")
   let reactions = try store.reactions(for: 1)
 
-  #expect(reactions.count == 3)
+  #expect(reactions.count == 4)
 
   // First reaction: Love from +456
   #expect(reactions[0].reactionType == .love)
@@ -507,6 +516,11 @@ func reactionsForMessageReturnsReactions() throws {
   // Third reaction: Laugh from +456
   #expect(reactions[2].reactionType == .laugh)
   #expect(reactions[2].sender == "+456")
+
+  // Fourth reaction: Custom emoji 🎉 from +456
+  #expect(reactions[3].reactionType == .custom("🎉"))
+  #expect(reactions[3].reactionType.emoji == "🎉")
+  #expect(reactions[3].sender == "+456")
 }
 
 @Test
@@ -587,6 +601,8 @@ func reactionTypeProperties() throws {
   #expect(ReactionType.emphasis.emoji == "‼️")
   #expect(ReactionType.question.name == "question")
   #expect(ReactionType.question.emoji == "❓")
+  #expect(ReactionType.custom("🎉").name == "custom")
+  #expect(ReactionType.custom("🎉").emoji == "🎉")
 }
 
 @Test
@@ -597,6 +613,8 @@ func reactionTypeFromRawValue() throws {
   #expect(ReactionType(rawValue: 2003) == .laugh)
   #expect(ReactionType(rawValue: 2004) == .emphasis)
   #expect(ReactionType(rawValue: 2005) == .question)
+  #expect(ReactionType(rawValue: 2006, customEmoji: "🎉") == .custom("🎉"))
+  #expect(ReactionType(rawValue: 2006) == nil)  // 2006 requires customEmoji
   #expect(ReactionType(rawValue: 9999) == nil)
 }
 
@@ -604,15 +622,18 @@ func reactionTypeFromRawValue() throws {
 func reactionTypeHelpers() throws {
   #expect(ReactionType.isReactionAdd(2000) == true)
   #expect(ReactionType.isReactionAdd(2005) == true)
+  #expect(ReactionType.isReactionAdd(2006) == true)
   #expect(ReactionType.isReactionAdd(1999) == false)
-  #expect(ReactionType.isReactionAdd(2006) == false)
+  #expect(ReactionType.isReactionAdd(2007) == false)
 
   #expect(ReactionType.isReactionRemove(3000) == true)
   #expect(ReactionType.isReactionRemove(3005) == true)
+  #expect(ReactionType.isReactionRemove(3006) == true)
   #expect(ReactionType.isReactionRemove(2999) == false)
-  #expect(ReactionType.isReactionRemove(3006) == false)
+  #expect(ReactionType.isReactionRemove(3007) == false)
 
   #expect(ReactionType.fromRemoval(3000) == .love)
   #expect(ReactionType.fromRemoval(3001) == .like)
   #expect(ReactionType.fromRemoval(3005) == .question)
+  #expect(ReactionType.fromRemoval(3006, customEmoji: "🎉") == .custom("🎉"))
 }
