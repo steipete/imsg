@@ -3,7 +3,7 @@ import Foundation
 /// The type of reaction on an iMessage.
 /// Values correspond to the `associated_message_type` column in the Messages database.
 /// Standard tapbacks are 2000-2005, custom emoji reactions are 2006.
-public enum ReactionType: Sendable, Equatable {
+public enum ReactionType: Sendable, Equatable, Hashable {
   case love
   case like
   case dislike
@@ -68,6 +68,13 @@ public enum ReactionType: Sendable, Equatable {
     case .question: return "❓"
     case .custom(let emoji): return emoji
     }
+  }
+
+  public var isCustom: Bool {
+    if case .custom = self {
+      return true
+    }
+    return false
   }
 }
 

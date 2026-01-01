@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- feat: tapback + emoji reaction support in JSON output (#8) — thanks @tylerwince
 
 ## 0.2.2 - Unreleased
 

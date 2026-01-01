@@ -15,6 +15,7 @@ public final class MessageStore: @unchecked Sendable {
   private let queue: DispatchQueue
   private let queueKey = DispatchSpecificKey<Void>()
   private let hasAttributedBody: Bool
+  private let hasReactionColumns: Bool
 
   public init(path: String = MessageStore.defaultPath) throws {
     let normalized = NSString(string: path).expandingTildeInPath
@@ -27,12 +28,18 @@ public final class MessageStore: @unchecked Sendable {
       self.connection = try Connection(location, readonly: true)
       self.connection.busyTimeout = 5
       self.hasAttributedBody = MessageStore.detectAttributedBody(connection: self.connection)
+      self.hasReactionColumns = MessageStore.detectReactionColumns(connection: self.connection)
     } catch {
       throw MessageStore.enhance(error: error, path: normalized)
     }
   }
 
-  init(connection: Connection, path: String, hasAttributedBody: Bool? = nil) throws {
+  init(
+    connection: Connection,
+    path: String,
+    hasAttributedBody: Bool? = nil,
+    hasReactionColumns: Bool? = nil
+  ) throws {
     self.path = path
     self.queue = DispatchQueue(label: "imsg.db.test", qos: .userInitiated)
     self.queue.setSpecific(key: queueKey, value: ())
@@ -42,6 +49,11 @@ public final class MessageStore: @unchecked Sendable {
       self.hasAttributedBody = hasAttributedBody
     } else {
       self.hasAttributedBody = MessageStore.detectAttributedBody(connection: connection)
+    }
+    if let hasReactionColumns {
+      self.hasReactionColumns = hasReactionColumns
+    } else {
+      self.hasReactionColumns = MessageStore.detectReactionColumns(connection: connection)
     }
   }
 
@@ -165,64 +177,6 @@ public final class MessageStore: @unchecked Sendable {
     }
   }
 
-  public func reactions(for messageID: Int64) throws -> [Reaction] {
-    // Reactions are stored as messages with associated_message_type in range 2000-2006
-    // 2000-2005 are standard tapbacks, 2006 is custom emoji reactions
-    // They reference the original message via associated_message_guid which has format "p:X/GUID"
-    // where X is the part index (0 for single-part messages) and GUID matches the original message's guid
-    let sql = """
-      SELECT r.ROWID, r.associated_message_type, h.id, r.is_from_me, r.date, IFNULL(r.text, '') as text
-      FROM message m
-      JOIN message r ON r.associated_message_guid LIKE '%' || m.guid
-      LEFT JOIN handle h ON r.handle_id = h.ROWID
-      WHERE m.ROWID = ?
-        AND r.associated_message_type >= 2000
-        AND r.associated_message_type <= 2006
-      ORDER BY r.date ASC
-      """
-    return try withConnection { db in
-      var reactions: [Reaction] = []
-      for row in try db.prepare(sql, messageID) {
-        let rowID = int64Value(row[0]) ?? 0
-        let typeValue = intValue(row[1]) ?? 0
-        let sender = stringValue(row[2])
-        let isFromMe = boolValue(row[3])
-        let date = appleDate(from: int64Value(row[4]))
-        let text = stringValue(row[5])
-
-        // For custom emoji reactions (2006), extract emoji from text like "Reacted 🎉 to ..."
-        let customEmoji: String? = typeValue == 2006 ? extractCustomEmoji(from: text) : nil
-        guard let reactionType = ReactionType(rawValue: typeValue, customEmoji: customEmoji) else {
-          continue
-        }
-
-        reactions.append(
-          Reaction(
-            rowID: rowID,
-            reactionType: reactionType,
-            sender: sender,
-            isFromMe: isFromMe,
-            date: date,
-            associatedMessageID: messageID
-          ))
-      }
-      return reactions
-    }
-  }
-
-  /// Extract custom emoji from reaction message text like "Reacted 🎉 to "original message""
-  private func extractCustomEmoji(from text: String) -> String? {
-    // Format: "Reacted X to "..." where X is the emoji
-    // We look for the emoji between "Reacted " and " to "
-    guard let reactedRange = text.range(of: "Reacted "),
-          let toRange = text.range(of: " to ", range: reactedRange.upperBound..<text.endIndex)
-    else {
-      return nil
-    }
-    let emoji = String(text[reactedRange.upperBound..<toRange.lowerBound])
-    return emoji.isEmpty ? nil : emoji
-  }
-
   public func attachments(for messageID: Int64) throws -> [AttachmentMeta] {
     let sql = """
       SELECT a.filename, a.transfer_name, a.uti, a.mime_type, a.total_bytes, a.is_sticker
@@ -333,5 +287,152 @@ public final class MessageStore: @unchecked Sendable {
       return Data(blob.bytes)
     }
     return Data()
+  }
+}
+
+extension MessageStore {
+  public func reactions(for messageID: Int64) throws -> [Reaction] {
+    guard hasReactionColumns else { return [] }
+    // Reactions are stored as messages with associated_message_type in range 2000-2006
+    // 2000-2005 are standard tapbacks, 2006 is custom emoji reactions
+    // They reference the original message via associated_message_guid which has format "p:X/GUID"
+    // where X is the part index (0 for single-part messages) and GUID matches the original message's guid
+    let bodyColumn = hasAttributedBody ? "r.attributedBody" : "NULL"
+    let sql = """
+      SELECT r.ROWID, r.associated_message_type, h.id, r.is_from_me, r.date, IFNULL(r.text, '') as text,
+             \(bodyColumn) AS body
+      FROM message m
+      JOIN message r ON r.associated_message_guid LIKE '%' || m.guid
+      LEFT JOIN handle h ON r.handle_id = h.ROWID
+      WHERE m.ROWID = ?
+        AND r.associated_message_type >= 2000
+        AND r.associated_message_type <= 3006
+      ORDER BY r.date ASC
+      """
+    return try withConnection { db in
+      var reactions: [Reaction] = []
+      var reactionIndex: [ReactionKey: Int] = [:]
+      for row in try db.prepare(sql, messageID) {
+        let rowID = int64Value(row[0]) ?? 0
+        let typeValue = intValue(row[1]) ?? 0
+        let sender = stringValue(row[2])
+        let isFromMe = boolValue(row[3])
+        let date = appleDate(from: int64Value(row[4]))
+        let text = stringValue(row[5])
+        let body = dataValue(row[6])
+        let resolvedText = text.isEmpty ? TypedStreamParser.parseAttributedBody(body) : text
+
+        if ReactionType.isReactionRemove(typeValue) {
+          let customEmoji = typeValue == 3006 ? extractCustomEmoji(from: resolvedText) : nil
+          let reactionType = ReactionType.fromRemoval(typeValue, customEmoji: customEmoji)
+          if let reactionType {
+            let key = ReactionKey(sender: sender, isFromMe: isFromMe, reactionType: reactionType)
+            if let index = reactionIndex.removeValue(forKey: key) {
+              reactions.remove(at: index)
+              reactionIndex = ReactionKey.reindex(reactions: reactions)
+            }
+            continue
+          }
+          if typeValue == 3006 {
+            if let index = reactions.firstIndex(where: {
+              $0.sender == sender && $0.isFromMe == isFromMe && $0.reactionType.isCustom
+            }) {
+              reactions.remove(at: index)
+              reactionIndex = ReactionKey.reindex(reactions: reactions)
+            }
+          }
+          continue
+        }
+
+        let customEmoji: String? = typeValue == 2006 ? extractCustomEmoji(from: resolvedText) : nil
+        guard let reactionType = ReactionType(rawValue: typeValue, customEmoji: customEmoji) else {
+          continue
+        }
+
+        let key = ReactionKey(sender: sender, isFromMe: isFromMe, reactionType: reactionType)
+        if let index = reactionIndex[key] {
+          reactions[index] = Reaction(
+            rowID: rowID,
+            reactionType: reactionType,
+            sender: sender,
+            isFromMe: isFromMe,
+            date: date,
+            associatedMessageID: messageID
+          )
+        } else {
+          reactionIndex[key] = reactions.count
+          reactions.append(
+            Reaction(
+              rowID: rowID,
+              reactionType: reactionType,
+              sender: sender,
+              isFromMe: isFromMe,
+              date: date,
+              associatedMessageID: messageID
+            ))
+        }
+      }
+      return reactions
+    }
+  }
+
+  /// Extract custom emoji from reaction message text like "Reacted 🎉 to "original message""
+  private func extractCustomEmoji(from text: String) -> String? {
+    // Format: "Reacted X to "..." where X is the emoji. Fallback to first emoji in text.
+    guard
+      let reactedRange = text.range(of: "Reacted "),
+      let toRange = text.range(of: " to ", range: reactedRange.upperBound..<text.endIndex)
+    else {
+      return extractFirstEmoji(from: text)
+    }
+    let emoji = String(text[reactedRange.upperBound..<toRange.lowerBound])
+    return emoji.isEmpty ? extractFirstEmoji(from: text) : emoji
+  }
+
+  private func extractFirstEmoji(from text: String) -> String? {
+    for character in text {
+      if character.unicodeScalars.contains(where: {
+        $0.properties.isEmojiPresentation || $0.properties.isEmoji
+      }) {
+        return String(character)
+      }
+    }
+    return nil
+  }
+
+  private static func detectReactionColumns(connection: Connection) -> Bool {
+    do {
+      let rows = try connection.prepare("PRAGMA table_info(message)")
+      var columns = Set<String>()
+      for row in rows {
+        if let name = row[1] as? String {
+          columns.insert(name.lowercased())
+        }
+      }
+      return columns.contains("guid")
+        && columns.contains("associated_message_guid")
+        && columns.contains("associated_message_type")
+    } catch {
+      return false
+    }
+  }
+
+  private struct ReactionKey: Hashable {
+    let sender: String
+    let isFromMe: Bool
+    let reactionType: ReactionType
+
+    static func reindex(reactions: [Reaction]) -> [ReactionKey: Int] {
+      var index: [ReactionKey: Int] = [:]
+      for (offset, reaction) in reactions.enumerated() {
+        let key = ReactionKey(
+          sender: reaction.sender,
+          isFromMe: reaction.isFromMe,
+          reactionType: reaction.reactionType
+        )
+        index[key] = offset
+      }
+      return index
+    }
   }
 }
