@@ -274,6 +274,17 @@ public final class MessageStore: @unchecked Sendable {
     }
   }
 
+  private func withConnection<T>(_ block: (Connection) throws -> T) throws -> T {
+    if DispatchQueue.getSpecific(key: queueKey) != nil {
+      return try block(connection)
+    }
+    return try queue.sync {
+      try block(connection)
+    }
+  }
+}
+
+extension MessageStore {
   public func attachments(for messageID: Int64) throws -> [AttachmentMeta] {
     let sql = """
       SELECT a.filename, a.transfer_name, a.uti, a.mime_type, a.total_bytes, a.is_sticker
@@ -314,17 +325,6 @@ public final class MessageStore: @unchecked Sendable {
     }
   }
 
-  private func withConnection<T>(_ block: (Connection) throws -> T) throws -> T {
-    if DispatchQueue.getSpecific(key: queueKey) != nil {
-      return try block(connection)
-    }
-    return try queue.sync {
-      try block(connection)
-    }
-  }
-}
-
-extension MessageStore {
   public func reactions(for messageID: Int64) throws -> [Reaction] {
     guard hasReactionColumns else { return [] }
     // Reactions are stored as messages with associated_message_type in range 2000-2006
