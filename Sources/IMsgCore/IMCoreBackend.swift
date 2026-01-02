@@ -2,12 +2,13 @@ import Darwin
 import Foundation
 import ObjectiveC
 
-@_silgen_name("objc_msgSend")
-private func objc_msgSend(_ target: AnyObject, _ selector: Selector, ...) -> AnyObject?
-
 enum IMCoreBackend {
   private static let allowEnvKey = "IMSG_ALLOW_PRIVATE"
   private static let replyAssociatedMessageType = 1000
+  private static func msgSendPtr() -> UnsafeMutableRawPointer? {
+    let handle = dlopen(nil, RTLD_LAZY)
+    return dlsym(handle, "objc_msgSend")
+  }
 
   static func send(_ options: MessageSendOptions) throws {
     guard isPrivateAllowed() else {
@@ -28,8 +29,11 @@ enum IMCoreBackend {
         ?? callObject(registry, "existingChatWithGUID:", chatTarget as NSString)
         ?? callObject(registry, "chatWithHandle:", chatTarget as NSString)
     } else {
-      chat = callObject(registry, "chatWithHandle:", options.recipient as NSString)
-        ?? callObject(registry, "existingChatWithHandle:", options.recipient as NSString)
+      guard let handle = makeHandle(recipient: options.recipient) else {
+        throw IMsgError.privateApiFailure("Unable to resolve IMHandle for recipient.")
+      }
+      chat = callObject(registry, "existingChatWithHandle:", handle)
+        ?? callObject(registry, "chatWithHandle:", handle)
     }
     guard let chat else {
       throw IMsgError.privateApiFailure("Unable to resolve IMChat for target.")
@@ -56,36 +60,51 @@ enum IMCoreBackend {
   }
 
   private static func buildMessage(options: MessageSendOptions) -> AnyObject? {
-    guard let cls = NSClassFromString("IMMessage") as? NSObject.Type else { return nil }
-    var message: AnyObject = cls.alloc()
+    guard let clsType = NSClassFromString("IMMessage") else { return nil }
+    guard let allocFn: ObjcMsgSendId = msgSend(ObjcMsgSendId.self) else { return nil }
+    let allocSel = Selector(("alloc"))
+    guard let allocated = allocFn(clsType, allocSel) else { return nil }
+    var message: AnyObject = allocated
 
-    let sel = Selector(("initWithSender:time:text:fileTransferGUIDs:flags:error:guid:subject:threadIdentifier:"))
-    let time = Date().timeIntervalSince1970
-    let text = options.text as NSString
-    let fileTransfers: [Any] = []
-    var error: NSError?
-    let guid: NSString? = nil
-    let subject: NSString? = nil
-    let threadIdentifier = options.replyToGUID.isEmpty ? nil : options.replyToGUID as NSString
+    let sel = Selector(
+      (
+        "initWithSender:time:text:messageSubject:fileTransferGUIDs:flags:error:guid:subject:" +
+          "associatedMessageGUID:associatedMessageType:associatedMessageRange:messageSummaryInfo:threadIdentifier:"
+      )
+    )
+    let time = NSDate()
+    let text = NSAttributedString(string: options.text)
+    let messageSubject: NSAttributedString? = nil
+    let fileTransfers: NSArray = []
+    let error: NSError? = nil
+    let guid: NSString? = UUID().uuidString as NSString
+    let subject: AnyObject? = nil
+    let associatedMessageGUID: NSString? = options.replyToGUID.isEmpty ? nil : options.replyToGUID as NSString
+    let associatedMessageType: Int64 = options.replyToGUID.isEmpty ? 0 : Int64(replyAssociatedMessageType)
+    let associatedMessageRange = NSRange(location: 0, length: 0)
+    let messageSummaryInfo: NSDictionary? = nil
+    let threadIdentifier: NSString? = nil
 
     guard message.responds(to: sel) else { return nil }
-    let initFn = unsafeBitCast(
-      objc_msgSend,
-      to: (@convention(c)
-          (AnyObject, Selector, AnyObject?, Double, AnyObject?, AnyObject?, UInt64,
-           UnsafeMutablePointer<NSError?>?, AnyObject?, AnyObject?, AnyObject?) -> AnyObject?).self
-    )
+    guard let initFn: ObjcMsgSendInitAssociated = msgSend(ObjcMsgSendInitAssociated.self) else {
+      return nil
+    }
     if let created = initFn(
       message,
       sel,
       nil,
       time,
       text,
-      fileTransfers as NSArray,
+      messageSubject,
+      fileTransfers,
       0,
-      &error,
+      error,
       guid,
       subject,
+      associatedMessageGUID,
+      associatedMessageType,
+      associatedMessageRange,
+      messageSummaryInfo,
       threadIdentifier
     ) {
       message = created
@@ -93,12 +112,7 @@ enum IMCoreBackend {
       return nil
     }
 
-    if !options.replyToGUID.isEmpty {
-      message.setValue(options.replyToGUID, forKey: "associatedMessageGUID")
-      message.setValue(NSNumber(value: replyAssociatedMessageType), forKey: "associatedMessageType")
-      message.setValue(options.replyToGUID, forKey: "threadIdentifier")
-    }
-
+    message.setValue(options.text as NSString, forKey: "plainBody")
     return message
   }
 
@@ -131,6 +145,39 @@ enum IMCoreBackend {
       ?? callObject(cls, "sharedRegistryIfAvailable")
   }
 
+  private static func makeHandle(recipient: String) -> AnyObject? {
+    guard let handleClass = NSClassFromString("IMHandle") as AnyObject? else { return nil }
+    guard let allocFn: ObjcMsgSendId = msgSend(ObjcMsgSendId.self) else { return nil }
+    guard let allocated = allocFn(handleClass, Selector(("alloc"))) else { return nil }
+    let selector = Selector(("initWithAccount:ID:alreadyCanonical:"))
+    guard allocated.responds(to: selector) else { return nil }
+    guard let initFn: ObjcMsgSendInitHandle = msgSend(ObjcMsgSendInitHandle.self) else {
+      return nil
+    }
+    let account = iMessageAccount()
+    return initFn(allocated, selector, account, recipient as NSString, false)
+  }
+
+  private static func iMessageAccount() -> AnyObject? {
+    guard let controllerClass = NSClassFromString("IMAccountController") as AnyObject? else {
+      return nil
+    }
+    guard let controller = callObject(controllerClass, "sharedInstance") else { return nil }
+    guard let serviceClass = NSClassFromString("IMService") as AnyObject? else {
+      return callObject(controller, "activeIMessageAccount")
+    }
+    let service = callObject(serviceClass, "iMessageService")
+    if let service {
+      if let account = callObject(controller, "bestOperationalAccountForService:", service) {
+        return account
+      }
+      if let account = callObject(controller, "bestActiveAccountForService:", service) {
+        return account
+      }
+    }
+    return callObject(controller, "activeIMessageAccount")
+  }
+
   private static func callObject(
     _ target: AnyObject,
     _ selectorName: String,
@@ -138,10 +185,7 @@ enum IMCoreBackend {
   ) -> AnyObject? {
     let selector = Selector(selectorName)
     guard target.responds(to: selector) else { return nil }
-    let fn = unsafeBitCast(
-      objc_msgSend,
-      to: (@convention(c) (AnyObject, Selector, AnyObject?) -> AnyObject?).self
-    )
+    guard let fn: ObjcMsgSendIdObj = msgSend(ObjcMsgSendIdObj.self) else { return nil }
     return fn(target, selector, arg)
   }
 
@@ -152,10 +196,7 @@ enum IMCoreBackend {
     _ adjustingSender: Bool,
     _ shouldQueue: Bool
   ) {
-    let fn = unsafeBitCast(
-      objc_msgSend,
-      to: (@convention(c) (AnyObject, Selector, AnyObject, Bool, Bool) -> Void).self
-    )
+    guard let fn: ObjcMsgSendVoid = msgSend(ObjcMsgSendVoid.self) else { return }
     fn(target, selector, message, adjustingSender, shouldQueue)
   }
 
@@ -167,10 +208,40 @@ enum IMCoreBackend {
     _ adjustingSender: Bool,
     _ shouldQueue: Bool
   ) {
-    let fn = unsafeBitCast(
-      objc_msgSend,
-      to: (@convention(c) (AnyObject, Selector, AnyObject, AnyObject?, Bool, Bool) -> Void).self
-    )
+    guard let fn: ObjcMsgSendVoidAccount = msgSend(ObjcMsgSendVoidAccount.self) else { return }
     fn(target, selector, message, account, adjustingSender, shouldQueue)
   }
+
+  private static func msgSend<T>(_ type: T.Type) -> T? {
+    guard let ptr = msgSendPtr() else { return nil }
+    return unsafeBitCast(ptr, to: type)
+  }
 }
+
+private typealias ObjcMsgSendId = @convention(c) (AnyObject, Selector) -> AnyObject?
+private typealias ObjcMsgSendIdObj = @convention(c) (AnyObject, Selector, AnyObject?) -> AnyObject?
+private typealias ObjcMsgSendVoid = @convention(c) (AnyObject, Selector, AnyObject, Bool, Bool) -> Void
+private typealias ObjcMsgSendVoidAccount =
+  @convention(c) (AnyObject, Selector, AnyObject, AnyObject?, Bool, Bool) -> Void
+private typealias ObjcMsgSendInitHandle =
+  @convention(c) (AnyObject, Selector, AnyObject?, NSString, Bool) -> AnyObject?
+private typealias ObjcMsgSendInitAssociated =
+  @convention(c)
+    (
+      AnyObject,
+      Selector,
+      AnyObject?,
+      NSDate,
+      NSAttributedString?,
+      NSAttributedString?,
+      NSArray,
+      UInt64,
+      NSError?,
+      NSString?,
+      AnyObject?,
+      NSString?,
+      Int64,
+      NSRange,
+      NSDictionary?,
+      NSString?
+    ) -> AnyObject?

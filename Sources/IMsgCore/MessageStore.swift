@@ -175,15 +175,15 @@ public final class MessageStore: @unchecked Sendable {
           Message(
             rowID: rowID,
             chatID: chatID,
-            guid: guid,
-            replyToGUID: replyToGUID,
             sender: sender,
             text: resolvedText,
             date: date,
             isFromMe: isFromMe,
             service: service,
             handleID: handleID,
-            attachmentsCount: attachments
+            attachmentsCount: attachments,
+            guid: guid,
+            replyToGUID: replyToGUID
           ))
       }
       return messages
@@ -239,15 +239,15 @@ public final class MessageStore: @unchecked Sendable {
           Message(
             rowID: rowID,
             chatID: resolvedChatID,
-            guid: guid,
-            replyToGUID: replyToGUID,
             sender: sender,
             text: resolvedText,
             date: date,
             isFromMe: isFromMe,
             service: service,
             handleID: handleID,
-            attachmentsCount: attachments
+            attachmentsCount: attachments,
+            guid: guid,
+            replyToGUID: replyToGUID
           ))
       }
       return messages
