@@ -28,6 +28,28 @@ func attachmentDisplayPrefersTransferName() {
     missing: false
   )
   #expect(displayName(for: meta) == "friendly.dat")
+  let fallback = AttachmentMeta(
+    filename: "file.dat",
+    transferName: "",
+    uti: "",
+    mimeType: "",
+    totalBytes: 0,
+    isSticker: false,
+    originalPath: "",
+    missing: false
+  )
+  #expect(displayName(for: fallback) == "file.dat")
+  let unknown = AttachmentMeta(
+    filename: "",
+    transferName: "",
+    uti: "",
+    mimeType: "",
+    totalBytes: 0,
+    isSticker: false,
+    originalPath: "",
+    missing: false
+  )
+  #expect(displayName(for: unknown) == "(unknown)")
   #expect(pluralSuffix(for: 1) == "")
   #expect(pluralSuffix(for: 2) == "s")
 }
@@ -59,7 +81,9 @@ func outputModelsEncodeExpectedKeys() throws {
     isFromMe: false,
     service: "iMessage",
     handleID: nil,
-    attachmentsCount: 0
+    attachmentsCount: 0,
+    guid: "msg-guid-7",
+    replyToGUID: "msg-guid-1"
   )
   let attachment = AttachmentMeta(
     filename: "file.dat",
@@ -84,6 +108,8 @@ func outputModelsEncodeExpectedKeys() throws {
   let messageData = try JSONEncoder().encode(messagePayload)
   let messageObject = try JSONSerialization.jsonObject(with: messageData) as? [String: Any]
   #expect(messageObject?["chat_id"] as? Int64 == 1)
+  #expect(messageObject?["guid"] as? String == "msg-guid-7")
+  #expect(messageObject?["reply_to_guid"] as? String == "msg-guid-1")
   #expect(messageObject?["created_at"] != nil)
 
   let attachmentPayload = AttachmentPayload(meta: attachment)

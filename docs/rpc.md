@@ -1,4 +1,4 @@
-# RPC (proposed)
+# RPC
 
 Goal: signal-style JSON-RPC without a daemon. Clawdis spawns `imsg rpc` and talks over stdio.
 
@@ -55,10 +55,12 @@ Params (direct):
 - `file` (string, optional)
 - `service` ("imessage"|"sms"|"auto", optional)
 - `region` (string, optional)
+- `reply_to_guid` (string, optional; not supported by AppleScript sends)
 
 Params (group):
 - `chat_id` or `chat_identifier` or `chat_guid` (one required; `chat_id` preferred)
 - `text` / `file` as above
+- `reply_to_guid` (string, optional; not supported by AppleScript sends)
 
 Result:
 - `{ "ok": true }`
@@ -78,6 +80,8 @@ Result:
 ### Message
 - `id` (rowid)
 - `chat_id` (always present; preferred handle for routing)
+- `guid` (string)
+- `reply_to_guid` (string, optional)
 - `sender`
 - `is_from_me`
 - `text`
@@ -104,7 +108,7 @@ Response:
 
 Subscribe:
 ```
-{"jsonrpc":"2.0","id":"2","method":"watch.subscribe","params":{"include_chat":true}}
+{"jsonrpc":"2.0","id":"2","method":"watch.subscribe","params":{"chat_id":1}}
 ```
 
 Notification:

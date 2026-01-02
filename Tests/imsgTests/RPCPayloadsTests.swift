@@ -40,7 +40,9 @@ func messagePayloadIncludesChatFields() {
     isFromMe: false,
     service: "iMessage",
     handleID: nil,
-    attachmentsCount: 1
+    attachmentsCount: 1,
+    guid: "msg-guid-5",
+    replyToGUID: "msg-guid-1"
   )
   let chatInfo = ChatInfo(
     id: 10,
@@ -75,6 +77,8 @@ func messagePayloadIncludesChatFields() {
     reactions: [reaction]
   )
   #expect(payload["chat_id"] as? Int64 == 10)
+  #expect(payload["guid"] as? String == "msg-guid-5")
+  #expect(payload["reply_to_guid"] as? String == "msg-guid-1")
   #expect(payload["chat_identifier"] as? String == "iMessage;+;chat123")
   #expect(payload["chat_name"] as? String == "Group")
   #expect(payload["is_group"] as? Bool == true)
@@ -82,6 +86,32 @@ func messagePayloadIncludesChatFields() {
   #expect(
     (payload["reactions"] as? [[String: Any]])?.first?["emoji"] as? String
       == ReactionType.like.emoji)
+}
+
+@Test
+func messagePayloadOmitsEmptyReplyToGuid() {
+  let message = Message(
+    rowID: 6,
+    chatID: 10,
+    sender: "+123",
+    text: "hello",
+    date: Date(timeIntervalSince1970: 1),
+    isFromMe: false,
+    service: "iMessage",
+    handleID: nil,
+    attachmentsCount: 0,
+    guid: "msg-guid-6",
+    replyToGUID: nil
+  )
+  let payload = messagePayload(
+    message: message,
+    chatInfo: nil,
+    participants: [],
+    attachments: [],
+    reactions: []
+  )
+  #expect(payload["reply_to_guid"] == nil)
+  #expect(payload["guid"] as? String == "msg-guid-6")
 }
 
 @Test

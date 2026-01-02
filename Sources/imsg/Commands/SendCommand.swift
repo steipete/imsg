@@ -16,6 +16,9 @@ enum SendCommand {
             label: "chatIdentifier", names: [.long("chat-identifier")],
             help: "chat identifier (e.g. iMessage;+;chat...)"),
           .make(label: "chatGUID", names: [.long("chat-guid")], help: "chat guid"),
+          .make(
+            label: "replyToGUID", names: [.long("reply-to-guid")],
+            help: "reply to message guid (not supported by AppleScript)"),
           .make(label: "text", names: [.long("text")], help: "message body"),
           .make(label: "file", names: [.long("file")], help: "path to attachment"),
           .make(
@@ -46,12 +49,16 @@ enum SendCommand {
     let chatID = values.optionInt64("chatID")
     let chatIdentifier = values.option("chatIdentifier") ?? ""
     let chatGUID = values.option("chatGUID") ?? ""
+    let replyToGUID = values.option("replyToGUID") ?? ""
     let hasChatTarget = chatID != nil || !chatIdentifier.isEmpty || !chatGUID.isEmpty
     if hasChatTarget && !recipient.isEmpty {
       throw ParsedValuesError.invalidOption("to")
     }
     if !hasChatTarget && recipient.isEmpty {
       throw ParsedValuesError.missingOption("to")
+    }
+    if !replyToGUID.isEmpty {
+      throw IMsgError.replyToNotSupported("Messages AppleScript does not support reply-to.")
     }
 
     let text = values.option("text") ?? ""
@@ -87,7 +94,8 @@ enum SendCommand {
         service: service,
         region: region,
         chatIdentifier: resolvedChatIdentifier,
-        chatGUID: resolvedChatGUID
+        chatGUID: resolvedChatGUID,
+        replyToGUID: replyToGUID
       ))
 
     if runtime.jsonOutput {

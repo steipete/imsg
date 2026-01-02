@@ -218,6 +218,7 @@ final class RPCServer {
     let chatID = int64Param(params["chat_id"])
     let chatIdentifier = stringParam(params["chat_identifier"]) ?? ""
     let chatGUID = stringParam(params["chat_guid"]) ?? ""
+    let replyToGUID = stringParam(params["reply_to_guid"]) ?? ""
     let hasChatTarget = chatID != nil || !chatIdentifier.isEmpty || !chatGUID.isEmpty
     let recipient = stringParam(params["to"]) ?? ""
     if hasChatTarget && !recipient.isEmpty {
@@ -225,6 +226,9 @@ final class RPCServer {
     }
     if !hasChatTarget && recipient.isEmpty {
       throw RPCError.invalidParams("to is required for direct sends")
+    }
+    if !replyToGUID.isEmpty {
+      throw RPCError.invalidParams("reply_to_guid not supported for AppleScript sends")
     }
 
     var resolvedChatIdentifier = chatIdentifier
@@ -248,7 +252,8 @@ final class RPCServer {
         service: service,
         region: region,
         chatIdentifier: resolvedChatIdentifier,
-        chatGUID: resolvedChatGUID
+        chatGUID: resolvedChatGUID,
+        replyToGUID: replyToGUID
       )
     )
     respond(id: id, result: ["ok": true])

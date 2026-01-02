@@ -64,4 +64,21 @@ extension MessageStore {
     }
     return Data()
   }
+
+  func normalizeAssociatedGUID(_ guid: String) -> String {
+    guard !guid.isEmpty else { return "" }
+    guard let slash = guid.lastIndex(of: "/") else { return guid }
+    let nextIndex = guid.index(after: slash)
+    guard nextIndex < guid.endIndex else { return guid }
+    return String(guid[nextIndex...])
+  }
+
+  func replyToGUID(associatedGuid: String, associatedType: Int?) -> String? {
+    let normalized = normalizeAssociatedGUID(associatedGuid)
+    guard !normalized.isEmpty else { return nil }
+    if let type = associatedType, ReactionType.isReaction(type) {
+      return nil
+    }
+    return normalized
+  }
 }

@@ -44,6 +44,11 @@ public enum ReactionType: Sendable, Equatable, Hashable {
     return value >= 3000 && value <= 3006
   }
 
+  /// Whether this associated_message_type represents any reaction add/remove
+  public static func isReaction(_ value: Int) -> Bool {
+    return isReactionAdd(value) || isReactionRemove(value)
+  }
+
   /// Human-readable name for the reaction
   public var name: String {
     switch self {
@@ -145,6 +150,8 @@ public struct ChatInfo: Sendable, Equatable {
 public struct Message: Sendable, Equatable {
   public let rowID: Int64
   public let chatID: Int64
+  public let guid: String
+  public let replyToGUID: String?
   public let sender: String
   public let text: String
   public let date: Date
@@ -162,10 +169,14 @@ public struct Message: Sendable, Equatable {
     isFromMe: Bool,
     service: String,
     handleID: Int64?,
-    attachmentsCount: Int
+    attachmentsCount: Int,
+    guid: String = "",
+    replyToGUID: String? = nil
   ) {
     self.rowID = rowID
     self.chatID = chatID
+    self.guid = guid
+    self.replyToGUID = replyToGUID
     self.sender = sender
     self.text = text
     self.date = date

@@ -76,6 +76,19 @@ private enum CommandTestDatabase {
     try db.run("INSERT INTO chat_message_join(chat_id, message_id) VALUES (1, 1)")
     return path
   }
+
+  static func makePathWithAttachment() throws -> String {
+    let path = try makePath()
+    let db = try Connection(path)
+    try db.run(
+      """
+      INSERT INTO attachment(ROWID, filename, transfer_name, uti, mime_type, total_bytes, is_sticker)
+      VALUES (1, '/tmp/file.dat', 'file.dat', 'public.data', 'application/octet-stream', 10, 0)
+      """
+    )
+    try db.run("INSERT INTO message_attachment_join(message_id, attachment_id) VALUES (1, 1)")
+    return path
+  }
 }
 
 @Test
@@ -103,6 +116,30 @@ func historyCommandRunsWithChatID() async throws {
 }
 
 @Test
+func historyCommandRunsWithAttachmentsNonJson() async throws {
+  let path = try CommandTestDatabase.makePathWithAttachment()
+  let values = ParsedValues(
+    positional: [],
+    options: ["db": [path], "chatID": ["1"], "limit": ["5"]],
+    flags: ["attachments"]
+  )
+  let runtime = RuntimeOptions(parsedValues: values)
+  try await HistoryCommand.spec.run(values, runtime)
+}
+
+@Test
+func chatsCommandRunsWithPlainOutput() async throws {
+  let path = try CommandTestDatabase.makePath()
+  let values = ParsedValues(
+    positional: [],
+    options: ["db": [path], "limit": ["5"]],
+    flags: []
+  )
+  let runtime = RuntimeOptions(parsedValues: values)
+  try await ChatsCommand.spec.run(values, runtime)
+}
+
+@Test
 func sendCommandRejectsMissingRecipient() async {
   let values = ParsedValues(
     positional: [],
@@ -115,6 +152,29 @@ func sendCommandRejectsMissingRecipient() async {
     #expect(Bool(false))
   } catch let error as ParsedValuesError {
     #expect(error.description.contains("Missing required option"))
+  } catch {
+    #expect(Bool(false))
+  }
+}
+
+@Test
+func sendCommandRejectsReplyToGuid() async {
+  let values = ParsedValues(
+    positional: [],
+    options: ["to": ["+15551234567"], "text": ["hi"], "replyToGUID": ["msg-guid-1"]],
+    flags: []
+  )
+  let runtime = RuntimeOptions(parsedValues: values)
+  do {
+    try await SendCommand.spec.run(values, runtime)
+    #expect(Bool(false))
+  } catch let error as IMsgError {
+    switch error {
+    case .replyToNotSupported:
+      #expect(Bool(true))
+    default:
+      #expect(Bool(false))
+    }
   } catch {
     #expect(Bool(false))
   }
@@ -200,6 +260,75 @@ func watchCommandRunsWithStubStream() async throws {
     service: "iMessage",
     handleID: nil,
     attachmentsCount: 2
+  )
+  let streamProvider:
+    (
+      MessageWatcher,
+      Int64?,
+      Int64?,
+      MessageWatcherConfiguration
+    ) -> AsyncThrowingStream<Message, Error> = { _, _, _, _ in
+      AsyncThrowingStream { continuation in
+        continuation.yield(message)
+        continuation.finish()
+      }
+    }
+  try await WatchCommand.run(
+    values: values,
+    runtime: runtime,
+    storeFactory: { _ in store },
+    streamProvider: streamProvider
+  )
+}
+
+@Test
+func watchCommandRunsWithJsonOutput() async throws {
+  let values = ParsedValues(
+    positional: [],
+    options: ["db": ["/tmp/unused"], "debounce": ["1ms"]],
+    flags: ["jsonOutput"]
+  )
+  let runtime = RuntimeOptions(parsedValues: values)
+  let db = try Connection(.inMemory)
+  try db.execute(
+    """
+    CREATE TABLE attachment (
+      ROWID INTEGER PRIMARY KEY,
+      filename TEXT,
+      transfer_name TEXT,
+      uti TEXT,
+      mime_type TEXT,
+      total_bytes INTEGER,
+      is_sticker INTEGER
+    );
+    """
+  )
+  try db.execute(
+    "CREATE TABLE message_attachment_join (message_id INTEGER, attachment_id INTEGER);")
+  try db.run(
+    """
+    INSERT INTO attachment(ROWID, filename, transfer_name, uti, mime_type, total_bytes, is_sticker)
+    VALUES (1, '/tmp/file.dat', 'file.dat', 'public.data', 'application/octet-stream', 10, 0)
+    """
+  )
+  try db.run("INSERT INTO message_attachment_join(message_id, attachment_id) VALUES (1, 1)")
+
+  let store = try MessageStore(
+    connection: db,
+    path: ":memory:",
+    hasAttributedBody: false,
+    hasReactionColumns: false
+  )
+  let message = Message(
+    rowID: 1,
+    chatID: 1,
+    sender: "+123",
+    text: "hello",
+    date: Date(),
+    isFromMe: false,
+    service: "iMessage",
+    handleID: nil,
+    attachmentsCount: 1
   )
   let streamProvider:
     (

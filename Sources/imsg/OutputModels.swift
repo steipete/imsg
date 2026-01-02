@@ -28,6 +28,8 @@ struct ChatPayload: Codable {
 struct MessagePayload: Codable {
   let id: Int64
   let chatID: Int64
+  let guid: String
+  let replyToGUID: String?
   let sender: String
   let isFromMe: Bool
   let text: String
@@ -38,6 +40,8 @@ struct MessagePayload: Codable {
   init(message: Message, attachments: [AttachmentMeta], reactions: [Reaction] = []) {
     self.id = message.rowID
     self.chatID = message.chatID
+    self.guid = message.guid
+    self.replyToGUID = message.replyToGUID
     self.sender = message.sender
     self.isFromMe = message.isFromMe
     self.text = message.text
@@ -49,6 +53,8 @@ struct MessagePayload: Codable {
   enum CodingKeys: String, CodingKey {
     case id
     case chatID = "chat_id"
+    case guid
+    case replyToGUID = "reply_to_guid"
     case sender
     case isFromMe = "is_from_me"
     case text

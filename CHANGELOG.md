@@ -1,9 +1,20 @@
 # Changelog
 
 ## Unreleased
-- feat: tapback + emoji reaction support in JSON output (#8) — thanks @tylerwince
+- feat: expose message guid + reply_to_guid metadata in JSON output
+- fix: exclude reaction rows from history/watch output and tighten reaction matching
+- fix: reject reply_to_guid sends (AppleScript limitation)
+- test: add reply + reaction filtering coverage
 
-## 0.2.2 - Unreleased
+## 0.3.0 - 2026-01-02
+- feat: JSON-RPC server over stdin/stdout (`imsg rpc`) with chats, history, watch, and send
+- feat: group chat metadata in JSON/RPC output (participants, chat identifiers, is_group)
+- feat: tapback + emoji reaction support in JSON output (#8) — thanks @tylerwince
+- enhancement: custom emoji reactions and tapback removal handling
+- fix: harden reaction detection
+- docs: add RPC + group chat notes
+- test: expand RPC/command coverage, add reaction fixtures, drop unused stdout helper
+- chore: update copyright year to 2026
 
 ## 0.2.1 - 2025-12-30
 - fix: avoid crash parsing long attributed bodies (>256 bytes) (thanks @tommybananas)

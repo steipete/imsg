@@ -32,9 +32,10 @@ func messagePayload(
   let identifier = chatInfo?.identifier ?? ""
   let guid = chatInfo?.guid ?? ""
   let name = chatInfo?.name ?? ""
-  return [
+  var payload: [String: Any] = [
     "id": message.rowID,
     "chat_id": message.chatID,
+    "guid": message.guid,
     "sender": message.sender,
     "is_from_me": message.isFromMe,
     "text": message.text,
@@ -47,6 +48,10 @@ func messagePayload(
     "participants": participants,
     "is_group": isGroupHandle(identifier: identifier, guid: guid),
   ]
+  if let replyToGUID = message.replyToGUID, !replyToGUID.isEmpty {
+    payload["reply_to_guid"] = replyToGUID
+  }
+  return payload
 }
 
 func attachmentPayload(_ meta: AttachmentMeta) -> [String: Any] {

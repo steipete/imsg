@@ -16,6 +16,7 @@ public struct MessageSendOptions: Sendable {
   public var region: String
   public var chatIdentifier: String
   public var chatGUID: String
+  public var replyToGUID: String
 
   public init(
     recipient: String,
@@ -24,7 +25,8 @@ public struct MessageSendOptions: Sendable {
     service: MessageService = .auto,
     region: String = "US",
     chatIdentifier: String = "",
-    chatGUID: String = ""
+    chatGUID: String = "",
+    replyToGUID: String = ""
   ) {
     self.recipient = recipient
     self.text = text
@@ -33,6 +35,7 @@ public struct MessageSendOptions: Sendable {
     self.region = region
     self.chatIdentifier = chatIdentifier
     self.chatGUID = chatGUID
+    self.replyToGUID = replyToGUID
   }
 }
 
@@ -54,6 +57,9 @@ public struct MessageSender {
     var resolved = options
     let chatTarget = resolved.chatIdentifier.isEmpty ? resolved.chatGUID : resolved.chatIdentifier
     let useChat = !chatTarget.isEmpty
+    if !resolved.replyToGUID.isEmpty {
+      throw IMsgError.replyToNotSupported("Messages AppleScript does not support reply-to.")
+    }
     if useChat == false {
       if resolved.region.isEmpty { resolved.region = "US" }
       resolved.recipient = normalizer.normalize(resolved.recipient, region: resolved.region)

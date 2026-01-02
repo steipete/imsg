@@ -39,6 +39,14 @@ func iso8601ParserParsesFormats() {
 }
 
 @Test
+func iso8601ParserFormatsDates() {
+  let date = Date(timeIntervalSince1970: 0)
+  let formatted = ISO8601Parser.format(date)
+  #expect(formatted.contains("T"))
+  #expect(ISO8601Parser.parse(formatted) != nil)
+}
+
+@Test
 func messageFilterHonorsParticipantsAndDates() throws {
   let now = Date(timeIntervalSince1970: 1000)
   let message = Message(
@@ -153,9 +161,47 @@ func messageSenderUsesChatIdentifier() throws {
 }
 
 @Test
+func messageSenderRejectsReplyTo() throws {
+  let sender = MessageSender(runner: { _, _ in })
+  do {
+    try sender.send(
+      MessageSendOptions(
+        recipient: "+16502530000",
+        text: "hi",
+        attachmentPath: "",
+        service: .auto,
+        region: "US",
+        replyToGUID: "msg-guid-1"
+      )
+    )
+    #expect(Bool(false))
+  } catch let error as IMsgError {
+    switch error {
+    case .replyToNotSupported:
+      #expect(Bool(true))
+    default:
+      #expect(Bool(false))
+    }
+  } catch {
+    #expect(Bool(false))
+  }
+}
+
+@Test
 func errorDescriptionsIncludeDetails() {
   let error = IMsgError.invalidService("weird")
   #expect(error.errorDescription?.contains("Invalid service: weird") == true)
   let chatError = IMsgError.invalidChatTarget("bad")
   #expect(chatError.errorDescription?.contains("Invalid chat target: bad") == true)
+  let replyError = IMsgError.replyToNotSupported("nope")
+  #expect(replyError.errorDescription?.contains("Reply-to not supported: nope") == true)
+  let dateError = IMsgError.invalidISODate("2024-99-99")
+  #expect(dateError.errorDescription?.contains("Invalid ISO8601 date") == true)
+  let scriptError = IMsgError.appleScriptFailure("nope")
+  #expect(scriptError.errorDescription?.contains("AppleScript failed: nope") == true)
+  let underlying = NSError(domain: "Test", code: 1)
+  let permission = IMsgError.permissionDenied(path: "/tmp/chat.db", underlying: underlying)
+  let permissionDescription = permission.errorDescription ?? ""
+  #expect(permissionDescription.contains("Permission Error") == true)
+  #expect(permissionDescription.contains("/tmp/chat.db") == true)
 }

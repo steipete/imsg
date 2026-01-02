@@ -200,6 +200,210 @@ func messagesAfterReturnsMessages() throws {
 }
 
 @Test
+func messagesAfterExcludesReactionRows() throws {
+  let db = try Connection(.inMemory)
+  try db.execute(
+    """
+    CREATE TABLE message (
+      ROWID INTEGER PRIMARY KEY,
+      handle_id INTEGER,
+      text TEXT,
+      guid TEXT,
+      associated_message_guid TEXT,
+      associated_message_type INTEGER,
+      date INTEGER,
+      is_from_me INTEGER,
+      service TEXT
+    );
+    """
+  )
+  try db.execute("CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT);")
+  try db.execute("CREATE TABLE chat_message_join (chat_id INTEGER, message_id INTEGER);")
+  try db.execute(
+    "CREATE TABLE message_attachment_join (message_id INTEGER, attachment_id INTEGER);")
+
+  let now = Date()
+  try db.run("INSERT INTO handle(ROWID, id) VALUES (1, '+123')")
+  try db.run(
+    """
+    INSERT INTO message(ROWID, handle_id, text, guid, associated_message_guid, associated_message_type, date, is_from_me, service)
+    VALUES (1, 1, 'hello', 'msg-guid-1', NULL, 0, ?, 0, 'iMessage')
+    """,
+    TestDatabase.appleEpoch(now)
+  )
+  try db.run(
+    """
+    INSERT INTO message(ROWID, handle_id, text, guid, associated_message_guid, associated_message_type, date, is_from_me, service)
+    VALUES (2, 1, '', 'reaction-guid-1', 'p:0/msg-guid-1', 2002, ?, 0, 'iMessage')
+    """,
+    TestDatabase.appleEpoch(now.addingTimeInterval(1))
+  )
+  try db.run(
+    """
+    INSERT INTO message(ROWID, handle_id, text, guid, associated_message_guid, associated_message_type, date, is_from_me, service)
+    VALUES (3, 1, 'reply', 'msg-guid-3', 'p:0/msg-guid-1', 1000, ?, 0, 'iMessage')
+    """,
+    TestDatabase.appleEpoch(now.addingTimeInterval(2))
+  )
+  try db.run("INSERT INTO chat_message_join(chat_id, message_id) VALUES (1, 1)")
+  try db.run("INSERT INTO chat_message_join(chat_id, message_id) VALUES (1, 2)")
+  try db.run("INSERT INTO chat_message_join(chat_id, message_id) VALUES (1, 3)")
+
+  let store = try MessageStore(connection: db, path: ":memory:")
+  let messages = try store.messagesAfter(afterRowID: 0, chatID: 1, limit: 10)
+  let rowIDs = messages.map { $0.rowID }
+  #expect(messages.count == 2)
+  #expect(rowIDs.contains(1))
+  #expect(rowIDs.contains(3))
+  #expect(rowIDs.contains(2) == false)
+}
+
+@Test
+func messagesExcludeReactionRows() throws {
+  let db = try Connection(.inMemory)
+  try db.execute(
+    """
+    CREATE TABLE message (
+      ROWID INTEGER PRIMARY KEY,
+      handle_id INTEGER,
+      text TEXT,
+      guid TEXT,
+      associated_message_guid TEXT,
+      associated_message_type INTEGER,
+      date INTEGER,
+      is_from_me INTEGER,
+      service TEXT
+    );
+    """
+  )
+  try db.execute("CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT);")
+  try db.execute("CREATE TABLE chat_message_join (chat_id INTEGER, message_id INTEGER);")
+  try db.execute(
+    "CREATE TABLE message_attachment_join (message_id INTEGER, attachment_id INTEGER);")
+
+  let now = Date()
+  try db.run("INSERT INTO handle(ROWID, id) VALUES (1, '+123')")
+  try db.run(
+    """
+    INSERT INTO message(ROWID, handle_id, text, guid, associated_message_guid, associated_message_type, date, is_from_me, service)
+    VALUES (1, 1, 'hello', 'msg-guid-1', NULL, 0, ?, 0, 'iMessage')
+    """,
+    TestDatabase.appleEpoch(now)
+  )
+  try db.run(
+    """
+    INSERT INTO message(ROWID, handle_id, text, guid, associated_message_guid, associated_message_type, date, is_from_me, service)
+    VALUES (2, 1, '', 'reaction-guid-1', 'p:0/msg-guid-1', 2001, ?, 0, 'iMessage')
+    """,
+    TestDatabase.appleEpoch(now.addingTimeInterval(1))
+  )
+  try db.run("INSERT INTO chat_message_join(chat_id, message_id) VALUES (1, 1)")
+  try db.run("INSERT INTO chat_message_join(chat_id, message_id) VALUES (1, 2)")
+
+  let store = try MessageStore(connection: db, path: ":memory:")
+  let messages = try store.messages(chatID: 1, limit: 10)
+  #expect(messages.count == 1)
+  #expect(messages.first?.rowID == 1)
+}
+
+@Test
+func messagesExposeReplyToGuid() throws {
+  let db = try Connection(.inMemory)
+  try db.execute(
+    """
+    CREATE TABLE message (
+      ROWID INTEGER PRIMARY KEY,
+      handle_id INTEGER,
+      text TEXT,
+      guid TEXT,
+      associated_message_guid TEXT,
+      associated_message_type INTEGER,
+      date INTEGER,
+      is_from_me INTEGER,
+      service TEXT
+    );
+    """
+  )
+  try db.execute("CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT);")
+  try db.execute("CREATE TABLE chat_message_join (chat_id INTEGER, message_id INTEGER);")
+  try db.execute(
+    "CREATE TABLE message_attachment_join (message_id INTEGER, attachment_id INTEGER);")
+
+  let now = Date()
+  try db.run("INSERT INTO handle(ROWID, id) VALUES (1, '+123')")
+  try db.run(
+    """
+    INSERT INTO message(ROWID, handle_id, text, guid, associated_message_guid, associated_message_type, date, is_from_me, service)
+    VALUES (1, 1, 'base', 'msg-guid-1', NULL, 0, ?, 0, 'iMessage')
+    """,
+    TestDatabase.appleEpoch(now)
+  )
+  try db.run(
+    """
+    INSERT INTO message(ROWID, handle_id, text, guid, associated_message_guid, associated_message_type, date, is_from_me, service)
+    VALUES (2, 1, 'reply', 'msg-guid-2', 'p:0/msg-guid-1', 1000, ?, 0, 'iMessage')
+    """,
+    TestDatabase.appleEpoch(now.addingTimeInterval(1))
+  )
+  try db.run("INSERT INTO chat_message_join(chat_id, message_id) VALUES (1, 1)")
+  try db.run("INSERT INTO chat_message_join(chat_id, message_id) VALUES (1, 2)")
+
+  let store = try MessageStore(connection: db, path: ":memory:")
+  let messages = try store.messages(chatID: 1, limit: 10)
+  let reply = messages.first { $0.rowID == 2 }
+  #expect(reply?.guid == "msg-guid-2")
+  #expect(reply?.replyToGUID == "msg-guid-1")
+}
+
+@Test
+func messagesReplyToGuidHandlesNoPrefix() throws {
+  let db = try Connection(.inMemory)
+  try db.execute(
+    """
+    CREATE TABLE message (
+      ROWID INTEGER PRIMARY KEY,
+      handle_id INTEGER,
+      text TEXT,
+      guid TEXT,
+      associated_message_guid TEXT,
+      associated_message_type INTEGER,
+      date INTEGER,
+      is_from_me INTEGER,
+      service TEXT
+    );
+    """
+  )
+  try db.execute("CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT);")
+  try db.execute("CREATE TABLE chat_message_join (chat_id INTEGER, message_id INTEGER);")
+  try db.execute(
+    "CREATE TABLE message_attachment_join (message_id INTEGER, attachment_id INTEGER);")
+
+  let now = Date()
+  try db.run("INSERT INTO handle(ROWID, id) VALUES (1, '+123')")
+  try db.run(
+    """
+    INSERT INTO message(ROWID, handle_id, text, guid, associated_message_guid, associated_message_type, date, is_from_me, service)
+    VALUES (1, 1, 'base', 'msg-guid-1', NULL, 0, ?, 0, 'iMessage')
+    """,
+    TestDatabase.appleEpoch(now)
+  )
+  try db.run(
+    """
+    INSERT INTO message(ROWID, handle_id, text, guid, associated_message_guid, associated_message_type, date, is_from_me, service)
+    VALUES (2, 1, 'reply', 'msg-guid-2', 'msg-guid-1', 1000, ?, 0, 'iMessage')
+    """,
+    TestDatabase.appleEpoch(now.addingTimeInterval(1))
+  )
+  try db.run("INSERT INTO chat_message_join(chat_id, message_id) VALUES (1, 1)")
+  try db.run("INSERT INTO chat_message_join(chat_id, message_id) VALUES (1, 2)")
+
+  let store = try MessageStore(connection: db, path: ":memory:")
+  let messages = try store.messages(chatID: 1, limit: 10)
+  let reply = messages.first { $0.rowID == 2 }
+  #expect(reply?.replyToGUID == "msg-guid-1")
+}
+
+@Test
 func messagesByChatUsesAttributedBodyFallback() throws {
   let db = try Connection(.inMemory)
   try db.execute(

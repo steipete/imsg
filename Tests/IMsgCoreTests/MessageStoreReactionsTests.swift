@@ -198,6 +198,27 @@ func reactionsForMessageParsesCustomEmojiWithoutEnglishPrefix() throws {
 }
 
 @Test
+func reactionsMatchGuidWithoutPrefix() throws {
+  let db = try ReactionTestDatabase.makeConnection()
+  let now = Date()
+  try ReactionTestDatabase.seedBaseMessage(db, now: now)
+
+  try db.run(
+    """
+    INSERT INTO message(ROWID, handle_id, text, guid, associated_message_guid, associated_message_type, date, is_from_me, service)
+    VALUES (2, 2, '', 'reaction-guid-1', 'msg-guid-1', 2000, ?, 0, 'iMessage')
+    """,
+    ReactionTestDatabase.appleEpoch(now.addingTimeInterval(-500))
+  )
+
+  let store = try MessageStore(connection: db, path: ":memory:")
+  let reactions = try store.reactions(for: 1)
+
+  #expect(reactions.count == 1)
+  #expect(reactions[0].reactionType == .love)
+}
+
+@Test
 func reactionsForMessageRemovesCustomEmojiWithoutEmojiText() throws {
   let db = try ReactionTestDatabase.makeConnection()
   let now = Date()

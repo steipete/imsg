@@ -135,14 +135,22 @@ public final class MessageStore: @unchecked Sendable {
 
   public func messages(chatID: Int64, limit: Int) throws -> [Message] {
     let bodyColumn = hasAttributedBody ? "m.attributedBody" : "NULL"
+    let guidColumn = hasReactionColumns ? "m.guid" : "NULL"
+    let associatedGuidColumn = hasReactionColumns ? "m.associated_message_guid" : "NULL"
+    let associatedTypeColumn = hasReactionColumns ? "m.associated_message_type" : "NULL"
+    let reactionFilter =
+      hasReactionColumns
+      ? " AND (m.associated_message_type IS NULL OR m.associated_message_type < 2000 OR m.associated_message_type > 3006)"
+      : ""
     let sql = """
       SELECT m.ROWID, m.handle_id, h.id, IFNULL(m.text, '') AS text, m.date, m.is_from_me, m.service,
+             \(guidColumn) AS guid, \(associatedGuidColumn) AS associated_guid, \(associatedTypeColumn) AS associated_type,
              (SELECT COUNT(*) FROM message_attachment_join maj WHERE maj.message_id = m.ROWID) AS attachments,
              \(bodyColumn) AS body
       FROM message m
       JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
       LEFT JOIN handle h ON m.handle_id = h.ROWID
-      WHERE cmj.chat_id = ?
+      WHERE cmj.chat_id = ?\(reactionFilter)
       ORDER BY m.date DESC
       LIMIT ?
       """
@@ -156,13 +164,19 @@ public final class MessageStore: @unchecked Sendable {
         let date = appleDate(from: int64Value(row[4]))
         let isFromMe = boolValue(row[5])
         let service = stringValue(row[6])
-        let attachments = intValue(row[7]) ?? 0
-        let body = dataValue(row[8])
+        let guid = stringValue(row[7])
+        let associatedGuid = stringValue(row[8])
+        let associatedType = intValue(row[9])
+        let attachments = intValue(row[10]) ?? 0
+        let body = dataValue(row[11])
         let resolvedText = text.isEmpty ? TypedStreamParser.parseAttributedBody(body) : text
+        let replyToGUID = replyToGUID(associatedGuid: associatedGuid, associatedType: associatedType)
         messages.append(
           Message(
             rowID: rowID,
             chatID: chatID,
+            guid: guid,
+            replyToGUID: replyToGUID,
             sender: sender,
             text: resolvedText,
             date: date,
@@ -178,14 +192,22 @@ public final class MessageStore: @unchecked Sendable {
 
   public func messagesAfter(afterRowID: Int64, chatID: Int64?, limit: Int) throws -> [Message] {
     let bodyColumn = hasAttributedBody ? "m.attributedBody" : "NULL"
+    let guidColumn = hasReactionColumns ? "m.guid" : "NULL"
+    let associatedGuidColumn = hasReactionColumns ? "m.associated_message_guid" : "NULL"
+    let associatedTypeColumn = hasReactionColumns ? "m.associated_message_type" : "NULL"
+    let reactionFilter =
+      hasReactionColumns
+      ? " AND (m.associated_message_type IS NULL OR m.associated_message_type < 2000 OR m.associated_message_type > 3006)"
+      : ""
     var sql = """
       SELECT m.ROWID, cmj.chat_id, m.handle_id, h.id, IFNULL(m.text, '') AS text, m.date, m.is_from_me, m.service,
+             \(guidColumn) AS guid, \(associatedGuidColumn) AS associated_guid, \(associatedTypeColumn) AS associated_type,
              (SELECT COUNT(*) FROM message_attachment_join maj WHERE maj.message_id = m.ROWID) AS attachments,
              \(bodyColumn) AS body
       FROM message m
       LEFT JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
       LEFT JOIN handle h ON m.handle_id = h.ROWID
-      WHERE m.ROWID > ?
+      WHERE m.ROWID > ?\(reactionFilter)
       """
     var bindings: [Binding?] = [afterRowID]
     if let chatID {
@@ -206,13 +228,19 @@ public final class MessageStore: @unchecked Sendable {
         let date = appleDate(from: int64Value(row[5]))
         let isFromMe = boolValue(row[6])
         let service = stringValue(row[7])
-        let attachments = intValue(row[8]) ?? 0
-        let body = dataValue(row[9])
+        let guid = stringValue(row[8])
+        let associatedGuid = stringValue(row[9])
+        let associatedType = intValue(row[10])
+        let attachments = intValue(row[11]) ?? 0
+        let body = dataValue(row[12])
         let resolvedText = text.isEmpty ? TypedStreamParser.parseAttributedBody(body) : text
+        let replyToGUID = replyToGUID(associatedGuid: associatedGuid, associatedType: associatedType)
         messages.append(
           Message(
             rowID: rowID,
             chatID: resolvedChatID,
+            guid: guid,
+            replyToGUID: replyToGUID,
             sender: sender,
             text: resolvedText,
             date: date,
@@ -288,9 +316,12 @@ extension MessageStore {
       SELECT r.ROWID, r.associated_message_type, h.id, r.is_from_me, r.date, IFNULL(r.text, '') as text,
              \(bodyColumn) AS body
       FROM message m
-      JOIN message r ON r.associated_message_guid LIKE '%' || m.guid
+      JOIN message r ON r.associated_message_guid = m.guid
+        OR r.associated_message_guid LIKE '%/' || m.guid
       LEFT JOIN handle h ON r.handle_id = h.ROWID
       WHERE m.ROWID = ?
+        AND m.guid IS NOT NULL
+        AND m.guid != ''
         AND r.associated_message_type >= 2000
         AND r.associated_message_type <= 3006
       ORDER BY r.date ASC
