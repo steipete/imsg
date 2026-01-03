@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Use python3 if available, fall back to python
+PYTHON="${PYTHON:-$(command -v python3 || command -v python || echo python3)}"
+
 SQLITE_PACKAGE=".build/checkouts/SQLite.swift/Package.swift"
 PHONE_NUMBER_BUNDLE=".build/checkouts/PhoneNumberKit/PhoneNumberKit/Bundle+Resources.swift"
 
@@ -10,7 +13,7 @@ fi
 
 chmod u+w "$SQLITE_PACKAGE" || true
 
-python - <<'PY'
+$PYTHON - <<'PY'
 from pathlib import Path
 path = Path('.build/checkouts/SQLite.swift/Package.swift')
 text = path.read_text()
@@ -25,7 +28,7 @@ PY
 
 if [[ -f "$PHONE_NUMBER_BUNDLE" ]]; then
   chmod u+w "$PHONE_NUMBER_BUNDLE" || true
-  python - <<'PY'
+  $PYTHON - <<'PY'
 from pathlib import Path
 
 path = Path(".build/checkouts/PhoneNumberKit/PhoneNumberKit/Bundle+Resources.swift")
