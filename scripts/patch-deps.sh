@@ -10,7 +10,17 @@ fi
 
 chmod u+w "$SQLITE_PACKAGE" || true
 
-python - <<'PY'
+# Try python3, then python, then fail
+if command -v python3 >/dev/null 2>&1; then
+  PYTHON_BIN="python3"
+elif command -v python >/dev/null 2>&1; then
+  PYTHON_BIN="python"
+else
+  echo "Error: Python not found. Please install Python 3."
+  exit 1
+fi
+
+$PYTHON_BIN - <<'PY'
 from pathlib import Path
 path = Path('.build/checkouts/SQLite.swift/Package.swift')
 text = path.read_text()
@@ -25,7 +35,7 @@ PY
 
 if [[ -f "$PHONE_NUMBER_BUNDLE" ]]; then
   chmod u+w "$PHONE_NUMBER_BUNDLE" || true
-  python - <<'PY'
+  $PYTHON_BIN - <<'PY'
 from pathlib import Path
 
 path = Path(".build/checkouts/PhoneNumberKit/PhoneNumberKit/Bundle+Resources.swift")
