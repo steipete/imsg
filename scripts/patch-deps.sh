@@ -10,7 +10,7 @@ fi
 
 chmod u+w "$SQLITE_PACKAGE" || true
 
-python - <<'PY'
+python3 - <<'PY'
 from pathlib import Path
 path = Path('.build/checkouts/SQLite.swift/Package.swift')
 text = path.read_text()
@@ -25,7 +25,7 @@ PY
 
 if [[ -f "$PHONE_NUMBER_BUNDLE" ]]; then
   chmod u+w "$PHONE_NUMBER_BUNDLE" || true
-  python - <<'PY'
+  python3 - <<'PY'
 from pathlib import Path
 
 path = Path(".build/checkouts/PhoneNumberKit/PhoneNumberKit/Bundle+Resources.swift")
