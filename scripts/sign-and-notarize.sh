@@ -38,6 +38,7 @@ for bundle in "$ROOT/.build/release"/*.bundle; do
   fi
 done
 
+chmod -R u+rw "$DIST_DIR"
 xattr -cr "$DIST_DIR"
 find "$DIST_DIR" -name '._*' -delete
 
