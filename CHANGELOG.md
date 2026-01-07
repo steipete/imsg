@@ -1,14 +1,14 @@
 # Changelog
 
-## Unreleased (0.3.2)
+## Unreleased (0.4.0)
+- feat: surface audio message transcriptions (thanks @antons)
+- fix: stage message attachments in Messages attachments directory (thanks @antons)
 - fix: prefer chat guid for chat_id sends to avoid 1:1 AppleScript errors (thanks @mshuffett)
-- chore: replace pnpm scripts with make targets
+- fix: detect python3 in patch-deps script (thanks @visionik)
 - build: add universal binary build helper
 - ci: switch to make-based lint/test/build
 - docs: update build/test/release instructions
-- fix: stage message attachments in Messages attachments directory (thanks @antons)
-- feat: surface audio message transcriptions (thanks @antons)
-- fix: detect python3 in patch-deps script (thanks @visionik)
+- chore: replace pnpm scripts with make targets
 
 ## 0.3.0 - 2026-01-02
 - feat: JSON-RPC server over stdin/stdout (`imsg rpc`) with chats, history, watch, and send
