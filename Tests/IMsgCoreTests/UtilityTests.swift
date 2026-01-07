@@ -140,6 +140,12 @@ func messageSenderBuildsArguments() throws {
 
 @Test
 func messageSenderUsesChatIdentifier() throws {
+  let fileManager = FileManager.default
+  let tempDir = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try fileManager.createDirectory(at: tempDir, withIntermediateDirectories: true)
+  defer { try? fileManager.removeItem(at: tempDir) }
+  let attachment = tempDir.appendingPathComponent("file.dat")
+  try Data("hello".utf8).write(to: attachment)
   var captured: [String] = []
   let sender = MessageSender(runner: { _, args in
     captured = args
@@ -148,7 +154,7 @@ func messageSenderUsesChatIdentifier() throws {
     MessageSendOptions(
       recipient: "",
       text: "hi",
-      attachmentPath: "/tmp/file.dat",
+      attachmentPath: attachment.path,
       service: .sms,
       region: "US",
       chatIdentifier: "iMessage;+;chat123",
@@ -158,6 +164,112 @@ func messageSenderUsesChatIdentifier() throws {
   #expect(captured[5] == "iMessage;+;chat123")
   #expect(captured[6] == "1")
   #expect(captured[4] == "1")
+}
+
+@Test
+func messageSenderStagesAttachmentsBeforeSend() throws {
+  let fileManager = FileManager.default
+  let attachmentsSubdirectory = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try fileManager.createDirectory(at: attachmentsSubdirectory, withIntermediateDirectories: true)
+  defer { try? fileManager.removeItem(at: attachmentsSubdirectory) }
+  let sourceDir = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try fileManager.createDirectory(at: sourceDir, withIntermediateDirectories: true)
+  defer { try? fileManager.removeItem(at: sourceDir) }
+  let sourceFile = sourceDir.appendingPathComponent("sample.txt")
+  let payload = Data("hi".utf8)
+  try payload.write(to: sourceFile)
+
+  var captured: [String] = []
+  let sender = MessageSender(
+    runner: { _, args in captured = args },
+    attachmentsSubdirectoryProvider: { attachmentsSubdirectory }
+  )
+
+  try sender.send(
+    MessageSendOptions(
+      recipient: "+16502530000",
+      text: "",
+      attachmentPath: sourceFile.path,
+      service: .imessage,
+      region: "US"
+    )
+  )
+
+  let stagedPath = captured[3]
+  #expect(stagedPath != sourceFile.path)
+  #expect(stagedPath.hasPrefix(attachmentsSubdirectory.path))
+  #expect(fileManager.fileExists(atPath: stagedPath))
+  let stagedData = try Data(contentsOf: URL(fileURLWithPath: stagedPath))
+  #expect(stagedData == payload)
+}
+
+@Test
+func messageSenderThrowsWhenAttachmentsSubdirectoryIsReadOnly() throws {
+  let fileManager = FileManager.default
+  let readOnlyRoot = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try fileManager.createDirectory(at: readOnlyRoot, withIntermediateDirectories: true)
+  try fileManager.setAttributes([.posixPermissions: 0o555], ofItemAtPath: readOnlyRoot.path)
+  defer {
+    try? fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: readOnlyRoot.path)
+    try? fileManager.removeItem(at: readOnlyRoot)
+  }
+  let sourceFile = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  let payload = Data("payload".utf8)
+  try payload.write(to: sourceFile)
+  defer { try? fileManager.removeItem(at: sourceFile) }
+
+  let sender = MessageSender(
+    runner: { _, _ in },
+    attachmentsSubdirectoryProvider: { readOnlyRoot }
+  )
+
+  do {
+    try sender.send(
+      MessageSendOptions(
+        recipient: "+16502530000",
+        text: "",
+        attachmentPath: sourceFile.path,
+        service: .imessage,
+        region: "US"
+      )
+    )
+    #expect(Bool(false))
+  } catch {
+    #expect(Bool(true))
+  }
+}
+
+@Test
+func messageSenderThrowsWhenAttachmentMissing() {
+  let fileManager = FileManager.default
+  let attachmentsSubdirectory = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try? fileManager.createDirectory(at: attachmentsSubdirectory, withIntermediateDirectories: true)
+  defer { try? fileManager.removeItem(at: attachmentsSubdirectory) }
+  let missingFile = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString).path
+  var runnerCalled = false
+  let sender = MessageSender(
+    runner: { _, _ in runnerCalled = true },
+    attachmentsSubdirectoryProvider: { attachmentsSubdirectory }
+  )
+
+  do {
+    try sender.send(
+      MessageSendOptions(
+        recipient: "+16502530000",
+        text: "",
+        attachmentPath: missingFile,
+        service: .imessage,
+        region: "US"
+      )
+    )
+    #expect(Bool(false))
+  } catch let error as IMsgError {
+    #expect(error.errorDescription?.contains("Attachment not found") == true)
+  } catch {
+    #expect(Bool(false))
+  }
+
+  #expect(runnerCalled == false)
 }
 
 @Test

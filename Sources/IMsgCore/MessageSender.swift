@@ -35,18 +35,30 @@ public struct MessageSendOptions: Sendable {
   }
 }
 
-public struct MessageSender {
+  public struct MessageSender {
   private let normalizer: PhoneNumberNormalizer
   private let runner: (String, [String]) throws -> Void
+  private let attachmentsSubdirectoryProvider: () -> URL
 
   public init() {
     self.normalizer = PhoneNumberNormalizer()
     self.runner = MessageSender.runAppleScript
+    self.attachmentsSubdirectoryProvider = MessageSender.defaultAttachmentsSubdirectory
   }
 
   init(runner: @escaping (String, [String]) throws -> Void) {
     self.normalizer = PhoneNumberNormalizer()
     self.runner = runner
+    self.attachmentsSubdirectoryProvider = MessageSender.defaultAttachmentsSubdirectory
+  }
+
+  init(
+    runner: @escaping (String, [String]) throws -> Void,
+    attachmentsSubdirectoryProvider: @escaping () -> URL
+  ) {
+    self.normalizer = PhoneNumberNormalizer()
+    self.runner = runner
+    self.attachmentsSubdirectoryProvider = attachmentsSubdirectoryProvider
   }
 
   public func send(_ options: MessageSendOptions) throws {
@@ -61,7 +73,35 @@ public struct MessageSender {
       throw IMsgError.invalidChatTarget("Missing chat identifier or guid")
     }
 
+    if resolved.attachmentPath.isEmpty == false {
+      resolved.attachmentPath = try stageAttachment(at: resolved.attachmentPath)
+    }
+
     try sendViaAppleScript(resolved, chatTarget: chatTarget, useChat: useChat)
+  }
+
+  private func stageAttachment(at path: String) throws -> String {
+    let expandedPath = (path as NSString).expandingTildeInPath
+    let sourceURL = URL(fileURLWithPath: expandedPath)
+    let fileManager = FileManager.default
+    guard fileManager.fileExists(atPath: sourceURL.path) else {
+      throw IMsgError.appleScriptFailure("Attachment not found at \(sourceURL.path)")
+    }
+
+    let subdirectory = attachmentsSubdirectoryProvider()
+    try fileManager.createDirectory(at: subdirectory, withIntermediateDirectories: true)
+    let attachmentDir = subdirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try fileManager.createDirectory(at: attachmentDir, withIntermediateDirectories: true)
+    let destination = attachmentDir.appendingPathComponent(sourceURL.lastPathComponent, isDirectory: false)
+    try fileManager.copyItem(at: sourceURL, to: destination)
+    return destination.path
+  }
+
+  private static func defaultAttachmentsSubdirectory() -> URL {
+    let fileManager = FileManager.default
+    let home = fileManager.homeDirectoryForCurrentUser
+    let messagesRoot = home.appendingPathComponent("Library/Messages/Attachments", isDirectory: true)
+    return messagesRoot.appendingPathComponent("imsg", isDirectory: true)
   }
 
   private func sendViaAppleScript(
