@@ -76,6 +76,11 @@ extension MessageStore {
     return error
   }
 
+  static func appleEpoch(_ date: Date) -> Int64 {
+    let seconds = date.timeIntervalSince1970 - MessageStore.appleEpochOffset
+    return Int64(seconds * 1_000_000_000)
+  }
+
   func appleDate(from value: Int64?) -> Date {
     guard let value else { return Date(timeIntervalSince1970: MessageStore.appleEpochOffset) }
     return Date(

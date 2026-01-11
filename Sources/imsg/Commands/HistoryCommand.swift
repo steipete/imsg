@@ -46,8 +46,7 @@ enum HistoryCommand {
     )
 
     let store = try MessageStore(path: dbPath)
-    let messages = try store.messages(chatID: chatID, limit: limit)
-    let filtered = messages.filter { filter.allows($0) }
+    let filtered = try store.messages(chatID: chatID, limit: limit, filter: filter)
 
     if runtime.jsonOutput {
       for message in filtered {
