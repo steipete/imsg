@@ -64,6 +64,46 @@ func messagesByChatReturnsMessages() throws {
 }
 
 @Test
+func messagesByChatAppliesDateFilterBeforeLimit() throws {
+  let store = try TestDatabase.makeStore()
+  let all = try store.messages(chatID: 1, limit: 10)
+  let target = all.first { $0.rowID == 2 }
+  #expect(target != nil)
+
+  // Build a tight window around message 2's date so the filter matches it but not the newest message.
+  guard let target else { return }
+  let filter = MessageFilter(
+    startDate: target.date.addingTimeInterval(-1),
+    endDate: target.date.addingTimeInterval(1)
+  )
+  let filtered = try store.messages(chatID: 1, limit: 1, filter: filter)
+  #expect(filtered.count == 1)
+  #expect(filtered.first?.rowID == 2)
+}
+
+@Test
+func messagesByChatAppliesParticipantFilterBeforeLimit() throws {
+  let store = try TestDatabase.makeStore()
+
+  // Insert a newer "from me" message so limit=1 would pick it unless filtering happens in SQL.
+  try store.withConnection { db in
+    try db.run(
+      """
+      INSERT INTO message(ROWID, handle_id, text, date, is_from_me, service)
+      VALUES (4, 2, 'newest from me', ?, 1, 'iMessage')
+      """,
+      TestDatabase.appleEpoch(Date().addingTimeInterval(5))
+    )
+    try db.run("INSERT INTO chat_message_join(chat_id, message_id) VALUES (1, 4)")
+  }
+
+  let filter = MessageFilter(participants: ["+123"])
+  let filtered = try store.messages(chatID: 1, limit: 1, filter: filter)
+  #expect(filtered.count == 1)
+  #expect(filtered.first?.sender == "+123")
+}
+
+@Test
 func messagesAfterReturnsMessages() throws {
   let store = try TestDatabase.makeStore()
   let messages = try store.messagesAfter(afterRowID: 1, chatID: nil, limit: 10)
