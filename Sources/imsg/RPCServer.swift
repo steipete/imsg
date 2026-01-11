@@ -111,8 +111,7 @@ final class RPCServer {
           startISO: startISO,
           endISO: endISO
         )
-        let messages = try store.messages(chatID: chatID, limit: max(limit, 1))
-        let filtered = messages.filter { filter.allows($0) }
+        let filtered = try store.messages(chatID: chatID, limit: max(limit, 1), filter: filter)
         let payloads = try filtered.map { message in
           try buildMessagePayload(
             store: store,
