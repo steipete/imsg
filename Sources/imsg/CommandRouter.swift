@@ -15,6 +15,7 @@ struct CommandRouter {
       WatchCommand.spec,
       SendCommand.spec,
       RpcCommand.spec,
+      CompletionsCommand.spec,
     ]
     let descriptor = CommandDescriptor(
       name: rootName,
