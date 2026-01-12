@@ -1,6 +1,10 @@
 import Commander
 import Foundation
 
+/// Generates shell completion scripts and LLM context documentation.
+///
+/// Supports bash, zsh, fish shells and a special "llm" format that produces
+/// markdown documentation suitable for AI assistant context windows.
 enum CompletionsCommand {
   /// Note: This command intentionally does not use CommandSignatures.withRuntimeFlags()
   /// because --json, --verbose, and --log-level don't make sense for generating
@@ -24,12 +28,19 @@ enum CompletionsCommand {
     try run(shell: values.argument(0))
   }
 
+  /// Generates and prints completion output for the specified shell.
+  /// - Parameter shell: The target shell (bash, zsh, fish) or "llm" for markdown.
+  /// - Throws: `CompletionsError` if shell is nil or unrecognized.
   static func run(shell: String?) throws {
     let output = try generateOutput(shell: shell)
     Swift.print(output)
   }
 
-  /// Generate completion output without printing (for testing)
+  /// Generates completion output as a string without printing.
+  ///
+  /// - Parameter shell: The target shell (bash, zsh, fish) or "llm" for markdown.
+  /// - Returns: The generated completion script or documentation.
+  /// - Throws: `CompletionsError` if shell is nil or unrecognized.
   static func generateOutput(shell: String?) throws -> String {
     guard let shell = shell else {
       throw CompletionsError.missingShell
@@ -49,10 +60,14 @@ enum CompletionsCommand {
   }
 }
 
+/// Errors that can occur during completion generation.
 enum CompletionsError: Error, CustomStringConvertible, Sendable {
+  /// No shell argument was provided.
   case missingShell
+  /// The provided shell name is not recognized.
   case unknownShell(String)
 
+  /// Human-readable error message for display.
   var description: String {
     switch self {
     case .missingShell:
@@ -65,7 +80,10 @@ enum CompletionsError: Error, CustomStringConvertible, Sendable {
 
 // MARK: - Bash
 
+/// Generates bash completion scripts using the bash-completion framework.
 private enum BashCompletionGenerator {
+  /// Creates a bash completion script for the imsg CLI.
+  /// - Returns: Complete bash completion script as a string.
   static func generate() -> String {
     let meta = CompletionMetadata.self
     let commands = meta.commands.map { $0.name }.joined(separator: " ")
@@ -140,7 +158,10 @@ private enum BashCompletionGenerator {
 
 // MARK: - Zsh
 
+/// Generates zsh completion scripts using the zsh completion system.
 private enum ZshCompletionGenerator {
+  /// Creates a zsh completion script for the imsg CLI.
+  /// - Returns: Complete zsh completion script as a string.
   static func generate() -> String {
     let meta = CompletionMetadata.self
 
@@ -218,7 +239,10 @@ private enum ZshCompletionGenerator {
 
 // MARK: - Fish
 
+/// Generates fish shell completion scripts.
 private enum FishCompletionGenerator {
+  /// Creates a fish completion script for the imsg CLI.
+  /// - Returns: Complete fish completion script as a string.
   static func generate() -> String {
     let meta = CompletionMetadata.self
     var lines: [String] = []
@@ -314,7 +338,10 @@ private enum FishCompletionGenerator {
 
 // MARK: - LLM Context
 
+/// Generates markdown documentation suitable for AI assistant context windows.
 private enum LLMContextGenerator {
+  /// Creates a comprehensive CLI reference in markdown format.
+  /// - Returns: Markdown documentation with commands, options, and examples.
   static func generate() -> String {
     let meta = CompletionMetadata.self
     var lines: [String] = []

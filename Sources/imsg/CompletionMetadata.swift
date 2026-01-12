@@ -13,7 +13,10 @@ import IMsgCore
 ///
 /// Update this file when commands or options change.
 enum CompletionMetadata {
+  /// The CLI executable name used in completion scripts.
   static let cliName = "imsg"
+
+  /// Human-readable description of the CLI for help text and LLM context.
   static let description = "macOS CLI for iMessage/SMS - send, read, and stream messages"
 
   /// Service values derived from MessageService enum to avoid hardcoding
@@ -25,14 +28,22 @@ enum CompletionMetadata {
     "trace", "verbose", "debug", "info", "warning", "error", "critical",
   ]
 
+  /// Describes a CLI option for completion generation.
   struct Option {
+    /// Long form of the option (e.g., "chat-id" for --chat-id)
     let long: String
+    /// Optional short form (e.g., "v" for -v)
     let short: String?
+    /// Help text describing what the option does
     let description: String
+    /// Whether the option requires a value
     let takesValue: Bool
+    /// Hint for the type of value expected (e.g., "file", "rowid")
     let valueHint: String?
+    /// Valid choices for enumerated options
     let choices: [String]?
 
+    /// Creates an option definition for completion generation.
     init(
       _ long: String,
       short: String? = nil,
@@ -50,13 +61,19 @@ enum CompletionMetadata {
     }
   }
 
+  /// Describes a CLI command for completion generation.
   struct Command {
+    /// Command name (e.g., "chats", "send")
     let name: String
+    /// Brief description of what the command does
     let description: String
+    /// Command-specific options (runtime options are added automatically)
     let options: [Option]
+    /// Example usage strings for help text
     let examples: [String]
   }
 
+  /// Options available on all commands via Commander's withStandardRuntimeFlags.
   static let runtimeOptions: [Option] = [
     Option("db", description: "Path to chat.db", valueHint: "file"),
     Option("log-level", description: "Set log level", choices: logLevelChoices),
@@ -64,6 +81,7 @@ enum CompletionMetadata {
     Option("json", short: "j", description: "Emit machine-readable JSON output", takesValue: false),
   ]
 
+  /// All CLI commands with their options and examples for completion generation.
   static let commands: [Command] = [
     Command(
       name: "chats",
