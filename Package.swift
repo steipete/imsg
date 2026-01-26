@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "imsg",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS(.v12)],
     products: [
         .library(name: "IMsgCore", targets: ["IMsgCore"]),
         .executable(name: "imsg", targets: ["imsg"]),
