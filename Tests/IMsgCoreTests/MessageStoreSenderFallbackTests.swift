@@ -1,11 +1,11 @@
 import Foundation
 import SQLite
-import Testing
+import XCTest
 
 @testable import IMsgCore
 
-@Test
-func messagesUseDestinationCallerIDWhenSenderMissing() throws {
+final class MessageStoreSenderFallbackTests: XCTestCase {
+func testMessagesUseDestinationCallerIDWhenSenderMissing() throws {
   let db = try Connection(.inMemory)
   try db.execute(
     """
@@ -59,5 +59,6 @@ func messagesUseDestinationCallerIDWhenSenderMissing() throws {
 
   let store = try MessageStore(connection: db, path: ":memory:")
   let messages = try store.messages(chatID: 1, limit: 5)
-  #expect(messages.first?.sender == "me@icloud.com")
+  expect(messages.first?.sender == "me@icloud.com")
+}
 }

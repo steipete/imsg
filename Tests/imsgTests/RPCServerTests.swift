@@ -1,6 +1,6 @@
 import Foundation
 import SQLite
-import Testing
+import XCTest
 
 @testable import IMsgCore
 @testable import imsg
@@ -115,8 +115,8 @@ private func int64Value(_ value: Any?) -> Int64? {
   return nil
 }
 
-@Test
-func rpcChatsListReturnsChatPayload() async throws {
+final class RPCServerTests: XCTestCase {
+func testRpcChatsListReturnsChatPayload() async throws {
   let store = try RPCTestDatabase.makeStore()
   let output = TestRPCOutput()
   let server = RPCServer(store: store, verbose: false, output: output)
@@ -124,19 +124,18 @@ func rpcChatsListReturnsChatPayload() async throws {
   let line = #"{"jsonrpc":"2.0","id":"1","method":"chats.list","params":{"limit":10}}"#
   await server.handleLineForTesting(line)
 
-  #expect(output.responses.count == 1)
+  expect(output.responses.count == 1)
   let result = output.responses[0]["result"] as? [String: Any]
   let chats = result?["chats"] as? [[String: Any]] ?? []
-  #expect(chats.count == 1)
+  expect(chats.count == 1)
   let chat = chats[0]
-  #expect(int64Value(chat["id"]) == 1)
-  #expect(chat["identifier"] as? String == "iMessage;+;chat123")
-  #expect(chat["is_group"] as? Bool == true)
-  #expect((chat["participants"] as? [String])?.count == 2)
+  expect(int64Value(chat["id"]) == 1)
+  expect(chat["identifier"] as? String == "iMessage;+;chat123")
+  expect(chat["is_group"] as? Bool == true)
+  expect((chat["participants"] as? [String])?.count == 2)
 }
 
-@Test
-func rpcMessagesHistoryIncludesChatFields() async throws {
+func testRpcMessagesHistoryIncludesChatFields() async throws {
   let store = try RPCTestDatabase.makeStore()
   let output = TestRPCOutput()
   let server = RPCServer(store: store, verbose: false, output: output)
@@ -147,15 +146,14 @@ func rpcMessagesHistoryIncludesChatFields() async throws {
 
   let result = output.responses.first?["result"] as? [String: Any]
   let messages = result?["messages"] as? [[String: Any]] ?? []
-  #expect(messages.count == 1)
+  expect(messages.count == 1)
   let message = messages[0]
-  #expect(int64Value(message["chat_id"]) == 1)
-  #expect(message["chat_identifier"] as? String == "iMessage;+;chat123")
-  #expect(message["is_group"] as? Bool == true)
+  expect(int64Value(message["chat_id"]) == 1)
+  expect(message["chat_identifier"] as? String == "iMessage;+;chat123")
+  expect(message["is_group"] as? Bool == true)
 }
 
-@Test
-func rpcSendResolvesChatID() async throws {
+func testRpcSendResolvesChatID() async throws {
   let store = try RPCTestDatabase.makeStore()
   let output = TestRPCOutput()
   var captured: MessageSendOptions?
@@ -169,14 +167,13 @@ func rpcSendResolvesChatID() async throws {
   let line = #"{"jsonrpc":"2.0","id":"3","method":"send","params":{"chat_id":1,"text":"yo"}}"#
   await server.handleLineForTesting(line)
 
-  #expect(captured?.chatIdentifier == "iMessage;+;chat123")
-  #expect(captured?.chatGUID == "iMessage;+;chat123")
-  #expect(captured?.recipient.isEmpty == true)
-  #expect(output.responses.first?["result"] as? [String: Any] != nil)
+  expect(captured?.chatIdentifier == "iMessage;+;chat123")
+  expect(captured?.chatGUID == "iMessage;+;chat123")
+  expect(captured?.recipient.isEmpty == true)
+  expect(output.responses.first?["result"] as? [String: Any] != nil)
 }
 
-@Test
-func rpcSendRejectsMissingTextAndFile() async throws {
+func testRpcSendRejectsMissingTextAndFile() async throws {
   let store = try RPCTestDatabase.makeStore()
   let output = TestRPCOutput()
   let server = RPCServer(store: store, verbose: false, output: output)
@@ -184,13 +181,12 @@ func rpcSendRejectsMissingTextAndFile() async throws {
   let line = #"{"jsonrpc":"2.0","id":"4","method":"send","params":{"to":"+15551234567"}}"#
   await server.handleLineForTesting(line)
 
-  #expect(output.errors.count == 1)
+  expect(output.errors.count == 1)
   let error = output.errors[0]["error"] as? [String: Any]
-  #expect(int64Value(error?["code"]) == -32602)
+  expect(int64Value(error?["code"]) == -32602)
 }
 
-@Test
-func rpcRejectsInvalidJSON() async throws {
+func testRpcRejectsInvalidJSON() async throws {
   let store = try RPCTestDatabase.makeStore()
   let output = TestRPCOutput()
   let server = RPCServer(store: store, verbose: false, output: output)
@@ -198,11 +194,10 @@ func rpcRejectsInvalidJSON() async throws {
   await server.handleLineForTesting("not-json")
 
   let error = output.errors.first?["error"] as? [String: Any]
-  #expect(int64Value(error?["code"]) == -32700)
+  expect(int64Value(error?["code"]) == -32700)
 }
 
-@Test
-func rpcRejectsNonObjectRequest() async throws {
+func testRpcRejectsNonObjectRequest() async throws {
   let store = try RPCTestDatabase.makeStore()
   let output = TestRPCOutput()
   let server = RPCServer(store: store, verbose: false, output: output)
@@ -210,11 +205,10 @@ func rpcRejectsNonObjectRequest() async throws {
   await server.handleLineForTesting("[]")
 
   let error = output.errors.first?["error"] as? [String: Any]
-  #expect(int64Value(error?["code"]) == -32600)
+  expect(int64Value(error?["code"]) == -32600)
 }
 
-@Test
-func rpcRejectsInvalidJSONRPCVersion() async throws {
+func testRpcRejectsInvalidJSONRPCVersion() async throws {
   let store = try RPCTestDatabase.makeStore()
   let output = TestRPCOutput()
   let server = RPCServer(store: store, verbose: false, output: output)
@@ -223,11 +217,10 @@ func rpcRejectsInvalidJSONRPCVersion() async throws {
   await server.handleLineForTesting(line)
 
   let error = output.errors.first?["error"] as? [String: Any]
-  #expect(int64Value(error?["code"]) == -32600)
+  expect(int64Value(error?["code"]) == -32600)
 }
 
-@Test
-func rpcRejectsMissingMethod() async throws {
+func testRpcRejectsMissingMethod() async throws {
   let store = try RPCTestDatabase.makeStore()
   let output = TestRPCOutput()
   let server = RPCServer(store: store, verbose: false, output: output)
@@ -236,11 +229,10 @@ func rpcRejectsMissingMethod() async throws {
   await server.handleLineForTesting(line)
 
   let error = output.errors.first?["error"] as? [String: Any]
-  #expect(int64Value(error?["code"]) == -32600)
+  expect(int64Value(error?["code"]) == -32600)
 }
 
-@Test
-func rpcReportsMethodNotFound() async throws {
+func testRpcReportsMethodNotFound() async throws {
   let store = try RPCTestDatabase.makeStore()
   let output = TestRPCOutput()
   let server = RPCServer(store: store, verbose: false, output: output)
@@ -249,11 +241,10 @@ func rpcReportsMethodNotFound() async throws {
   await server.handleLineForTesting(line)
 
   let error = output.errors.first?["error"] as? [String: Any]
-  #expect(int64Value(error?["code"]) == -32601)
+  expect(int64Value(error?["code"]) == -32601)
 }
 
-@Test
-func rpcHistoryRequiresChatID() async throws {
+func testRpcHistoryRequiresChatID() async throws {
   let store = try RPCTestDatabase.makeStore()
   let output = TestRPCOutput()
   let server = RPCServer(store: store, verbose: false, output: output)
@@ -262,11 +253,10 @@ func rpcHistoryRequiresChatID() async throws {
   await server.handleLineForTesting(line)
 
   let error = output.errors.first?["error"] as? [String: Any]
-  #expect(int64Value(error?["code"]) == -32602)
+  expect(int64Value(error?["code"]) == -32602)
 }
 
-@Test
-func rpcSendRejectsInvalidService() async throws {
+func testRpcSendRejectsInvalidService() async throws {
   let store = try RPCTestDatabase.makeStore()
   let output = TestRPCOutput()
   let server = RPCServer(store: store, verbose: false, output: output)
@@ -276,11 +266,10 @@ func rpcSendRejectsInvalidService() async throws {
   await server.handleLineForTesting(line)
 
   let error = output.errors.first?["error"] as? [String: Any]
-  #expect(int64Value(error?["code"]) == -32602)
+  expect(int64Value(error?["code"]) == -32602)
 }
 
-@Test
-func rpcSendRejectsMissingRecipientForDirectSend() async throws {
+func testRpcSendRejectsMissingRecipientForDirectSend() async throws {
   let store = try RPCTestDatabase.makeStore()
   let output = TestRPCOutput()
   let server = RPCServer(store: store, verbose: false, output: output)
@@ -289,11 +278,10 @@ func rpcSendRejectsMissingRecipientForDirectSend() async throws {
   await server.handleLineForTesting(line)
 
   let error = output.errors.first?["error"] as? [String: Any]
-  #expect(int64Value(error?["code"]) == -32602)
+  expect(int64Value(error?["code"]) == -32602)
 }
 
-@Test
-func rpcSendRejectsChatAndRecipient() async throws {
+func testRpcSendRejectsChatAndRecipient() async throws {
   let store = try RPCTestDatabase.makeStore()
   let output = TestRPCOutput()
   let server = RPCServer(store: store, verbose: false, output: output)
@@ -303,11 +291,10 @@ func rpcSendRejectsChatAndRecipient() async throws {
   await server.handleLineForTesting(line)
 
   let error = output.errors.first?["error"] as? [String: Any]
-  #expect(int64Value(error?["code"]) == -32602)
+  expect(int64Value(error?["code"]) == -32602)
 }
 
-@Test
-func rpcSendRejectsUnknownChatID() async throws {
+func testRpcSendRejectsUnknownChatID() async throws {
   let store = try RPCTestDatabase.makeStore()
   let output = TestRPCOutput()
   let server = RPCServer(store: store, verbose: false, output: output)
@@ -316,11 +303,10 @@ func rpcSendRejectsUnknownChatID() async throws {
   await server.handleLineForTesting(line)
 
   let error = output.errors.first?["error"] as? [String: Any]
-  #expect(int64Value(error?["code"]) == -32602)
+  expect(int64Value(error?["code"]) == -32602)
 }
 
-@Test
-func rpcWatchSubscribeEmitsNotificationAndUnsubscribe() async throws {
+func testRpcWatchSubscribeEmitsNotificationAndUnsubscribe() async throws {
   let store = try RPCTestDatabase.makeStore()
   let output = TestRPCOutput()
   let server = RPCServer(store: store, verbose: false, output: output)
@@ -331,26 +317,25 @@ func rpcWatchSubscribeEmitsNotificationAndUnsubscribe() async throws {
 
   let result = output.responses.first?["result"] as? [String: Any]
   let subscription = int64Value(result?["subscription"]) ?? 0
-  #expect(subscription > 0)
+  expect(subscription > 0)
 
   for _ in 0..<20 {
     if output.notifications.count >= 1 { break }
     try await Task.sleep(nanoseconds: 50_000_000)
   }
-  #expect(output.notifications.count == 1)
+  expect(output.notifications.count == 1)
   let params = output.notifications.first?["params"] as? [String: Any]
-  #expect(int64Value(params?["subscription"]) == subscription)
-  #expect(params?["message"] as? [String: Any] != nil)
+  expect(int64Value(params?["subscription"]) == subscription)
+  expect(params?["message"] as? [String: Any] != nil)
 
   let unsubscribe =
     #"{"jsonrpc":"2.0","id":11,"method":"watch.unsubscribe","params":{"subscription":\#(subscription)}}"#
   await server.handleLineForTesting(unsubscribe)
 
-  #expect(output.responses.count >= 2)
+  expect(output.responses.count >= 2)
 }
 
-@Test
-func rpcWatchUnsubscribeRequiresSubscription() async throws {
+func testRpcWatchUnsubscribeRequiresSubscription() async throws {
   let store = try RPCTestDatabase.makeStore()
   let output = TestRPCOutput()
   let server = RPCServer(store: store, verbose: false, output: output)
@@ -359,5 +344,6 @@ func rpcWatchUnsubscribeRequiresSubscription() async throws {
   await server.handleLineForTesting(line)
 
   let error = output.errors.first?["error"] as? [String: Any]
-  #expect(int64Value(error?["code"]) == -32602)
+  expect(int64Value(error?["code"]) == -32602)
+}
 }

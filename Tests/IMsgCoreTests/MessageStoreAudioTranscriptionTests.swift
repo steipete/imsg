@@ -1,11 +1,11 @@
 import Foundation
 import SQLite
-import Testing
+import XCTest
 
 @testable import IMsgCore
 
-@Test
-func audioMessagesUseTranscriptionText() throws {
+final class MessageStoreAudioTranscriptionTests: XCTestCase {
+func testAudioMessagesUseTranscriptionText() throws {
   let db = try Connection(.inMemory)
   try db.execute(
     """
@@ -77,12 +77,11 @@ func audioMessagesUseTranscriptionText() throws {
 
   let store = try MessageStore(connection: db, path: ":memory:")
   let messages = try store.messages(chatID: 1, limit: 10)
-  #expect(messages.count == 1)
-  #expect(messages.first?.text == "test transcript")
+  expect(messages.count == 1)
+  expect(messages.first?.text == "test transcript")
 }
 
-@Test
-func messagesAfterUsesAudioTranscriptionText() throws {
+func testMessagesAfterUsesAudioTranscriptionText() throws {
   let db = try Connection(.inMemory)
   try db.execute(
     """
@@ -154,6 +153,7 @@ func messagesAfterUsesAudioTranscriptionText() throws {
 
   let store = try MessageStore(connection: db, path: ":memory:")
   let messages = try store.messagesAfter(afterRowID: 0, chatID: 1, limit: 10)
-  #expect(messages.count == 1)
-  #expect(messages.first?.text == "test transcript")
+  expect(messages.count == 1)
+  expect(messages.first?.text == "test transcript")
+}
 }

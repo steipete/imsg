@@ -1,6 +1,6 @@
 import Foundation
 import SQLite
-import Testing
+import XCTest
 
 @testable import IMsgCore
 
@@ -78,8 +78,8 @@ private enum ReactionTestDatabase {
   }
 }
 
-@Test
-func reactionsForMessageReturnsReactions() throws {
+final class MessageStoreReactionsTests: XCTestCase {
+func testReactionsForMessageReturnsReactions() throws {
   let db = try ReactionTestDatabase.makeConnection()
   let now = Date()
   try ReactionTestDatabase.seedBaseMessage(db, now: now)
@@ -120,25 +120,24 @@ func reactionsForMessageReturnsReactions() throws {
   let store = try MessageStore(connection: db, path: ":memory:")
   let reactions = try store.reactions(for: 1)
 
-  #expect(reactions.count == 4)
+  expect(reactions.count == 4)
 
-  #expect(reactions[0].reactionType == .love)
-  #expect(reactions[0].sender == "+456")
-  #expect(reactions[0].isFromMe == false)
+  expect(reactions[0].reactionType == .love)
+  expect(reactions[0].sender == "+456")
+  expect(reactions[0].isFromMe == false)
 
-  #expect(reactions[1].reactionType == .like)
-  #expect(reactions[1].isFromMe == true)
+  expect(reactions[1].reactionType == .like)
+  expect(reactions[1].isFromMe == true)
 
-  #expect(reactions[2].reactionType == .laugh)
-  #expect(reactions[2].sender == "+456")
+  expect(reactions[2].reactionType == .laugh)
+  expect(reactions[2].sender == "+456")
 
-  #expect(reactions[3].reactionType == .custom("🎉"))
-  #expect(reactions[3].reactionType.emoji == "🎉")
-  #expect(reactions[3].sender == "+456")
+  expect(reactions[3].reactionType == .custom("🎉"))
+  expect(reactions[3].reactionType.emoji == "🎉")
+  expect(reactions[3].sender == "+456")
 }
 
-@Test
-func reactionsForMessageWithNoReactionsReturnsEmpty() throws {
+func testReactionsForMessageWithNoReactionsReturnsEmpty() throws {
   let db = try ReactionTestDatabase.makeConnection()
   let now = Date()
   try ReactionTestDatabase.seedBaseMessage(db, now: now, text: "No reactions here")
@@ -146,11 +145,10 @@ func reactionsForMessageWithNoReactionsReturnsEmpty() throws {
   let store = try MessageStore(connection: db, path: ":memory:")
   let reactions = try store.reactions(for: 1)
 
-  #expect(reactions.isEmpty)
+  expect(reactions.isEmpty)
 }
 
-@Test
-func reactionsForMessageRemovesReactions() throws {
+func testReactionsForMessageRemovesReactions() throws {
   let db = try ReactionTestDatabase.makeConnection()
   let now = Date()
   try ReactionTestDatabase.seedBaseMessage(db, now: now)
@@ -173,11 +171,10 @@ func reactionsForMessageRemovesReactions() throws {
   let store = try MessageStore(connection: db, path: ":memory:")
   let reactions = try store.reactions(for: 1)
 
-  #expect(reactions.isEmpty)
+  expect(reactions.isEmpty)
 }
 
-@Test
-func reactionsForMessageParsesCustomEmojiWithoutEnglishPrefix() throws {
+func testReactionsForMessageParsesCustomEmojiWithoutEnglishPrefix() throws {
   let db = try ReactionTestDatabase.makeConnection()
   let now = Date()
   try ReactionTestDatabase.seedBaseMessage(db, now: now)
@@ -193,12 +190,11 @@ func reactionsForMessageParsesCustomEmojiWithoutEnglishPrefix() throws {
   let store = try MessageStore(connection: db, path: ":memory:")
   let reactions = try store.reactions(for: 1)
 
-  #expect(reactions.count == 1)
-  #expect(reactions[0].reactionType == .custom("🎉"))
+  expect(reactions.count == 1)
+  expect(reactions[0].reactionType == .custom("🎉"))
 }
 
-@Test
-func reactionsMatchGuidWithoutPrefix() throws {
+func testReactionsMatchGuidWithoutPrefix() throws {
   let db = try ReactionTestDatabase.makeConnection()
   let now = Date()
   try ReactionTestDatabase.seedBaseMessage(db, now: now)
@@ -214,12 +210,11 @@ func reactionsMatchGuidWithoutPrefix() throws {
   let store = try MessageStore(connection: db, path: ":memory:")
   let reactions = try store.reactions(for: 1)
 
-  #expect(reactions.count == 1)
-  #expect(reactions[0].reactionType == .love)
+  expect(reactions.count == 1)
+  expect(reactions[0].reactionType == .love)
 }
 
-@Test
-func reactionsForMessageRemovesCustomEmojiWithoutEmojiText() throws {
+func testReactionsForMessageRemovesCustomEmojiWithoutEmojiText() throws {
   let db = try ReactionTestDatabase.makeConnection()
   let now = Date()
   try ReactionTestDatabase.seedBaseMessage(db, now: now)
@@ -242,11 +237,10 @@ func reactionsForMessageRemovesCustomEmojiWithoutEmojiText() throws {
   let store = try MessageStore(connection: db, path: ":memory:")
   let reactions = try store.reactions(for: 1)
 
-  #expect(reactions.isEmpty)
+  expect(reactions.isEmpty)
 }
 
-@Test
-func reactionsForMessageReturnsEmptyWhenColumnsMissing() throws {
+func testReactionsForMessageReturnsEmptyWhenColumnsMissing() throws {
   let db = try Connection(.inMemory)
   try db.execute(
     """
@@ -263,56 +257,54 @@ func reactionsForMessageReturnsEmptyWhenColumnsMissing() throws {
   let store = try MessageStore(connection: db, path: ":memory:")
   let reactions = try store.reactions(for: 1)
 
-  #expect(reactions.isEmpty)
+  expect(reactions.isEmpty)
 }
 
-@Test
-func reactionTypeProperties() throws {
-  #expect(ReactionType.love.name == "love")
-  #expect(ReactionType.love.emoji == "❤️")
-  #expect(ReactionType.like.name == "like")
-  #expect(ReactionType.like.emoji == "👍")
-  #expect(ReactionType.dislike.name == "dislike")
-  #expect(ReactionType.dislike.emoji == "👎")
-  #expect(ReactionType.laugh.name == "laugh")
-  #expect(ReactionType.laugh.emoji == "😂")
-  #expect(ReactionType.emphasis.name == "emphasis")
-  #expect(ReactionType.emphasis.emoji == "‼️")
-  #expect(ReactionType.question.name == "question")
-  #expect(ReactionType.question.emoji == "❓")
-  #expect(ReactionType.custom("🎉").name == "custom")
-  #expect(ReactionType.custom("🎉").emoji == "🎉")
+func testReactionTypeProperties() throws {
+  expect(ReactionType.love.name == "love")
+  expect(ReactionType.love.emoji == "❤️")
+  expect(ReactionType.like.name == "like")
+  expect(ReactionType.like.emoji == "👍")
+  expect(ReactionType.dislike.name == "dislike")
+  expect(ReactionType.dislike.emoji == "👎")
+  expect(ReactionType.laugh.name == "laugh")
+  expect(ReactionType.laugh.emoji == "😂")
+  expect(ReactionType.emphasis.name == "emphasis")
+  expect(ReactionType.emphasis.emoji == "‼️")
+  expect(ReactionType.question.name == "question")
+  expect(ReactionType.question.emoji == "❓")
+  expect(ReactionType.custom("🎉").name == "custom")
+  expect(ReactionType.custom("🎉").emoji == "🎉")
 }
 
-@Test
-func reactionTypeFromRawValue() throws {
-  #expect(ReactionType(rawValue: 2000) == .love)
-  #expect(ReactionType(rawValue: 2001) == .like)
-  #expect(ReactionType(rawValue: 2002) == .dislike)
-  #expect(ReactionType(rawValue: 2003) == .laugh)
-  #expect(ReactionType(rawValue: 2004) == .emphasis)
-  #expect(ReactionType(rawValue: 2005) == .question)
-  #expect(ReactionType(rawValue: 2006, customEmoji: "🎉") == .custom("🎉"))
-  #expect(ReactionType(rawValue: 2006) == nil)
-  #expect(ReactionType(rawValue: 9999) == nil)
+func testReactionTypeFromRawValue() throws {
+  expect(ReactionType(rawValue: 2000) == .love)
+  expect(ReactionType(rawValue: 2001) == .like)
+  expect(ReactionType(rawValue: 2002) == .dislike)
+  expect(ReactionType(rawValue: 2003) == .laugh)
+  expect(ReactionType(rawValue: 2004) == .emphasis)
+  expect(ReactionType(rawValue: 2005) == .question)
+  expect(ReactionType(rawValue: 2006, customEmoji: "🎉") == .custom("🎉"))
+  expect(ReactionType(rawValue: 2006) == nil)
+  expect(ReactionType(rawValue: 9999) == nil)
 }
 
-@Test
-func reactionTypeHelpers() throws {
-  #expect(ReactionType.isReactionAdd(2000) == true)
-  #expect(ReactionType.isReactionAdd(2005) == true)
-  #expect(ReactionType.isReactionAdd(2006) == true)
-  #expect(ReactionType.isReactionAdd(1999) == false)
-  #expect(ReactionType.isReactionAdd(2007) == false)
+func testReactionTypeHelpers() throws {
+  expect(ReactionType.isReactionAdd(2000) == true)
+  expect(ReactionType.isReactionAdd(2005) == true)
+  expect(ReactionType.isReactionAdd(2006) == true)
+  expect(ReactionType.isReactionAdd(1999) == false)
+  expect(ReactionType.isReactionAdd(2007) == false)
 
-  #expect(ReactionType.isReactionRemove(3000) == true)
-  #expect(ReactionType.isReactionRemove(3005) == true)
-  #expect(ReactionType.isReactionRemove(3006) == true)
-  #expect(ReactionType.isReactionRemove(2999) == false)
-  #expect(ReactionType.isReactionRemove(3007) == false)
+  expect(ReactionType.isReactionRemove(3000) == true)
+  expect(ReactionType.isReactionRemove(3005) == true)
+  expect(ReactionType.isReactionRemove(3006) == true)
+  expect(ReactionType.isReactionRemove(2999) == false)
+  expect(ReactionType.isReactionRemove(3007) == false)
 
-  #expect(ReactionType.fromRemoval(3000) == .love)
-  #expect(ReactionType.fromRemoval(3001) == .like)
-  #expect(ReactionType.fromRemoval(3005) == .question)
-  #expect(ReactionType.fromRemoval(3006, customEmoji: "🎉") == .custom("🎉"))
+  expect(ReactionType.fromRemoval(3000) == .love)
+  expect(ReactionType.fromRemoval(3001) == .like)
+  expect(ReactionType.fromRemoval(3005) == .question)
+  expect(ReactionType.fromRemoval(3006, customEmoji: "🎉") == .custom("🎉"))
+}
 }
