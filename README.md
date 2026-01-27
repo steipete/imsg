@@ -12,7 +12,7 @@ A macOS Messages.app CLI to send, read, and stream iMessage/SMS (with attachment
 - Event-driven watch via filesystem events.
 
 ## Requirements
-- macOS 14+ with Messages.app signed in.
+- macOS 13+ with Messages.app signed in.
 - Full Disk Access for your terminal to read `~/Library/Messages/chat.db`.
 - Automation permission for your terminal to control Messages.app (for sending).
 - For SMS relay, enable “Text Message Forwarding” on your iPhone to this Mac.

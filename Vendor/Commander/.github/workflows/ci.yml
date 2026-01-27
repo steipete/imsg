@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  desktop-swift:
+    name: Desktop Swift (${{ matrix.os }})
+    # Swift 6.2.1 still crashes (SwiftTesting on Linux), so keep that leg for signal only.
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.allow_failure }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            allow_failure: false
+          - os: ubuntu-22.04
+            allow_failure: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode 16
+        if: runner.os == 'macOS'
+        run: sudo xcode-select -s /Applications/Xcode_16.1.app || sudo xcode-select -s /Applications/Xcode_16.0.app || sudo xcode-select -s /Applications/Xcode.app
+
+      - name: Install Swift toolchain (macOS/Linux)
+        if: runner.os != 'Windows'
+        uses: SwiftyLab/setup-swift@v1
+        with:
+          swift-version: '6.2.1'
+
+      - name: Build
+        run: swift build --build-tests
+
+      - name: Test
+        run: swift test
+        continue-on-error: ${{ runner.os != 'macOS' }}
+
+  apple-simulators:
+    name: Apple Platforms (${{ matrix.platform }})
+    runs-on: macos-15
+    needs: desktop-swift
+    strategy:
+      matrix:
+        platform:
+          - "macOS"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode 16
+        run: sudo xcode-select -s /Applications/Xcode_16.1.app || sudo xcode-select -s /Applications/Xcode_16.0.app || sudo xcode-select -s /Applications/Xcode.app
+      - name: Build for ${{ matrix.platform }}
+        run: |
+          xcodebuild \
+            -scheme Commander \
+            -destination "generic/platform=${{ matrix.platform }}" \
+            -skipPackagePluginValidation \
+            -skipMacroValidation \
+            BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
+            build
