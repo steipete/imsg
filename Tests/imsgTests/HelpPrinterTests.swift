@@ -1,11 +1,11 @@
 import Commander
 import Foundation
-import Testing
+import XCTest
 
 @testable import imsg
 
-@Test
-func helpPrinterPrintsCommandDetails() throws {
+final class HelpPrinterTests: XCTestCase {
+func testHelpPrinterPrintsCommandDetails() throws {
   let signature = CommandSignature(
     arguments: [
       .make(label: "arg", help: "arg help")
@@ -27,9 +27,10 @@ func helpPrinterPrintsCommandDetails() throws {
 
   let lines = HelpPrinter.renderCommand(rootName: "imsg", spec: spec)
   let output = lines.joined(separator: "\n")
-  #expect(output.contains("imsg demo"))
-  #expect(output.contains("Arguments:"))
-  #expect(output.contains("Options:"))
-  #expect(output.contains("-o, --opt <value>"))
-  #expect(output.contains("-f, --flag"))
+  expect(output.contains("imsg demo"))
+  expect(output.contains("Arguments:"))
+  expect(output.contains("Options:"))
+  expect(output.contains("-o, --opt <value>"))
+  expect(output.contains("-f, --flag"))
+}
 }

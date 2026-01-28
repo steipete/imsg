@@ -1,5 +1,5 @@
 import Foundation
-import Testing
+import XCTest
 
 @testable import IMsgCore
 
@@ -67,8 +67,8 @@ private final class TestMessageSender {
   }
 }
 
-@Test
-func messageSenderPrefersHandleWhenChatIdentifierLooksLikeHandle() throws {
+final class MessageSenderChatTargetTests: XCTestCase {
+func testMessageSenderPrefersHandleWhenChatIdentifierLooksLikeHandle() throws {
   let sender = TestMessageSender()
   let options = MessageSendOptions(
     recipient: "",
@@ -81,13 +81,12 @@ func messageSenderPrefersHandleWhenChatIdentifierLooksLikeHandle() throws {
   )
   let captured = try sender.send(options)
 
-  #expect(captured[5].isEmpty)
-  #expect(captured[6] == "0")
-  #expect(captured[0].contains("15551234567"))
+  expect(captured[5].isEmpty)
+  expect(captured[6] == "0")
+  expect(captured[0].contains("15551234567"))
 }
 
-@Test
-func messageSenderUsesChatGuidWhenIdentifierIsGroupHandle() throws {
+func testMessageSenderUsesChatGuidWhenIdentifierIsGroupHandle() throws {
   let sender = TestMessageSender()
   let options = MessageSendOptions(
     recipient: "",
@@ -100,6 +99,7 @@ func messageSenderUsesChatGuidWhenIdentifierIsGroupHandle() throws {
   )
   let captured = try sender.send(options)
 
-  #expect(captured[5] == "iMessage;+;group123")
-  #expect(captured[6] == "1")
+  expect(captured[5] == "iMessage;+;group123")
+  expect(captured[6] == "1")
+}
 }

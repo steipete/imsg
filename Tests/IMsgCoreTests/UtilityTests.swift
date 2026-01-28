@@ -1,53 +1,49 @@
 import Foundation
-import Testing
+import XCTest
 
 @testable import IMsgCore
 
-@Test
-func attachmentResolverResolvesPaths() throws {
+final class UtilityTests: XCTestCase {
+func testAttachmentResolverResolvesPaths() throws {
   let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
   try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
   let file = dir.appendingPathComponent("test.txt")
   try "hi".data(using: .utf8)!.write(to: file)
 
   let existing = AttachmentResolver.resolve(file.path)
-  #expect(existing.missing == false)
-  #expect(existing.resolved.hasSuffix("test.txt"))
+  expect(existing.missing == false)
+  expect(existing.resolved.hasSuffix("test.txt"))
 
   let missing = AttachmentResolver.resolve(dir.appendingPathComponent("missing.txt").path)
-  #expect(missing.missing == true)
+  expect(missing.missing == true)
 
   let directory = AttachmentResolver.resolve(dir.path)
-  #expect(directory.missing == true)
+  expect(directory.missing == true)
 }
 
-@Test
-func attachmentResolverDisplayNamePrefersTransfer() {
-  #expect(
+func testAttachmentResolverDisplayNamePrefersTransfer() {
+  expect(
     AttachmentResolver.displayName(filename: "file.dat", transferName: "nice.dat") == "nice.dat")
-  #expect(AttachmentResolver.displayName(filename: "file.dat", transferName: "") == "file.dat")
-  #expect(AttachmentResolver.displayName(filename: "", transferName: "") == "(unknown)")
+  expect(AttachmentResolver.displayName(filename: "file.dat", transferName: "") == "file.dat")
+  expect(AttachmentResolver.displayName(filename: "", transferName: "") == "(unknown)")
 }
 
-@Test
-func iso8601ParserParsesFormats() {
+func testIso8601ParserParsesFormats() {
   let fractional = "2024-01-02T03:04:05.678Z"
   let standard = "2024-01-02T03:04:05Z"
-  #expect(ISO8601Parser.parse(fractional) != nil)
-  #expect(ISO8601Parser.parse(standard) != nil)
-  #expect(ISO8601Parser.parse("") == nil)
+  expect(ISO8601Parser.parse(fractional) != nil)
+  expect(ISO8601Parser.parse(standard) != nil)
+  expect(ISO8601Parser.parse("") == nil)
 }
 
-@Test
-func iso8601ParserFormatsDates() {
+func testIso8601ParserFormatsDates() {
   let date = Date(timeIntervalSince1970: 0)
   let formatted = ISO8601Parser.format(date)
-  #expect(formatted.contains("T"))
-  #expect(ISO8601Parser.parse(formatted) != nil)
+  expect(formatted.contains("T"))
+  expect(ISO8601Parser.parse(formatted) != nil)
 }
 
-@Test
-func messageFilterHonorsParticipantsAndDates() throws {
+func testMessageFilterHonorsParticipantsAndDates() throws {
   let now = Date(timeIntervalSince1970: 1000)
   let message = Message(
     rowID: 1,
@@ -65,59 +61,53 @@ func messageFilterHonorsParticipantsAndDates() throws {
     startDate: now.addingTimeInterval(-10),
     endDate: now.addingTimeInterval(10)
   )
-  #expect(filter.allows(message) == true)
+  expect(filter.allows(message) == true)
   let pastFilter = MessageFilter(startDate: now.addingTimeInterval(5))
-  #expect(pastFilter.allows(message) == false)
+  expect(pastFilter.allows(message) == false)
 }
 
-@Test
-func messageFilterRejectsInvalidISO() {
+func testMessageFilterRejectsInvalidISO() {
   do {
     _ = try MessageFilter.fromISO(participants: [], startISO: "bad-date", endISO: nil)
-    #expect(Bool(false))
+    expect(Bool(false))
   } catch let error as IMsgError {
     switch error {
     case .invalidISODate(let value):
-      #expect(value == "bad-date")
+      expect(value == "bad-date")
     default:
-      #expect(Bool(false))
+      expect(Bool(false))
     }
   } catch {
-    #expect(Bool(false))
+    expect(Bool(false))
   }
 }
 
-@Test
-func typedStreamParserPrefersLongestSegment() {
+func testTypedStreamParserPrefersLongestSegment() {
   let short = [UInt8(0x01), UInt8(0x2b)] + Array("short".utf8) + [0x86, 0x84]
   let long = [UInt8(0x01), UInt8(0x2b)] + Array("longer text".utf8) + [0x86, 0x84]
   let data = Data(short + long)
-  #expect(TypedStreamParser.parseAttributedBody(data) == "longer text")
+  expect(TypedStreamParser.parseAttributedBody(data) == "longer text")
 }
 
-@Test
-func typedStreamParserTrimsControlCharacters() {
+func testTypedStreamParserTrimsControlCharacters() {
   let bytes: [UInt8] = [0x00, 0x0A] + Array("hello".utf8)
   let data = Data(bytes)
-  #expect(TypedStreamParser.parseAttributedBody(data) == "hello")
+  expect(TypedStreamParser.parseAttributedBody(data) == "hello")
 }
 
-@Test
-func phoneNumberNormalizerFormatsValidNumber() {
+func testPhoneNumberNormalizerFormatsValidNumber() {
   let normalizer = PhoneNumberNormalizer()
   let normalized = normalizer.normalize("+1 650-253-0000", region: "US")
-  #expect(normalized == "+16502530000")
+  expect(normalized == "+16502530000")
 }
 
-@Test
-func phoneNumberNormalizerReturnsInputOnFailure() {
+func testPhoneNumberNormalizerReturnsInputOnFailure() {
   let normalizer = PhoneNumberNormalizer()
   let normalized = normalizer.normalize("not-a-number", region: "US")
-  #expect(normalized == "not-a-number")
+  expect(normalized == "not-a-number")
 }
 
-@Test
-func messageSenderBuildsArguments() throws {
+func testMessageSenderBuildsArguments() throws {
   var captured: [String] = []
   let sender = MessageSender(runner: { _, args in
     captured = args
@@ -131,15 +121,14 @@ func messageSenderBuildsArguments() throws {
       region: "US"
     )
   )
-  #expect(captured.count == 7)
-  #expect(captured[0] == "+16502530000")
-  #expect(captured[2] == "imessage")
-  #expect(captured[5].isEmpty)
-  #expect(captured[6] == "0")
+  expect(captured.count == 7)
+  expect(captured[0] == "+16502530000")
+  expect(captured[2] == "imessage")
+  expect(captured[5].isEmpty)
+  expect(captured[6] == "0")
 }
 
-@Test
-func messageSenderUsesChatIdentifier() throws {
+func testMessageSenderUsesChatIdentifier() throws {
   let fileManager = FileManager.default
   let tempDir = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString)
   try fileManager.createDirectory(at: tempDir, withIntermediateDirectories: true)
@@ -165,13 +154,12 @@ func messageSenderUsesChatIdentifier() throws {
       chatGUID: "ignored-guid"
     )
   )
-  #expect(captured[5] == "ignored-guid")
-  #expect(captured[6] == "1")
-  #expect(captured[4] == "1")
+  expect(captured[5] == "ignored-guid")
+  expect(captured[6] == "1")
+  expect(captured[4] == "1")
 }
 
-@Test
-func messageSenderStagesAttachmentsBeforeSend() throws {
+func testMessageSenderStagesAttachmentsBeforeSend() throws {
   let fileManager = FileManager.default
   let attachmentsSubdirectory = fileManager.temporaryDirectory.appendingPathComponent(
     UUID().uuidString
@@ -202,15 +190,14 @@ func messageSenderStagesAttachmentsBeforeSend() throws {
   )
 
   let stagedPath = captured[3]
-  #expect(stagedPath != sourceFile.path)
-  #expect(stagedPath.hasPrefix(attachmentsSubdirectory.path))
-  #expect(fileManager.fileExists(atPath: stagedPath))
+  expect(stagedPath != sourceFile.path)
+  expect(stagedPath.hasPrefix(attachmentsSubdirectory.path))
+  expect(fileManager.fileExists(atPath: stagedPath))
   let stagedData = try Data(contentsOf: URL(fileURLWithPath: stagedPath))
-  #expect(stagedData == payload)
+  expect(stagedData == payload)
 }
 
-@Test
-func messageSenderThrowsWhenAttachmentsSubdirectoryIsReadOnly() throws {
+func testMessageSenderThrowsWhenAttachmentsSubdirectoryIsReadOnly() throws {
   let fileManager = FileManager.default
   let readOnlyRoot = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString)
   try fileManager.createDirectory(at: readOnlyRoot, withIntermediateDirectories: true)
@@ -239,14 +226,13 @@ func messageSenderThrowsWhenAttachmentsSubdirectoryIsReadOnly() throws {
         region: "US"
       )
     )
-    #expect(Bool(false))
+    expect(Bool(false))
   } catch {
-    #expect(Bool(true))
+    expect(Bool(true))
   }
 }
 
-@Test
-func messageSenderThrowsWhenAttachmentMissing() {
+func testMessageSenderThrowsWhenAttachmentMissing() {
   let fileManager = FileManager.default
   let attachmentsSubdirectory = fileManager.temporaryDirectory.appendingPathComponent(
     UUID().uuidString
@@ -270,18 +256,17 @@ func messageSenderThrowsWhenAttachmentMissing() {
         region: "US"
       )
     )
-    #expect(Bool(false))
+    expect(Bool(false))
   } catch let error as IMsgError {
-    #expect(error.errorDescription?.contains("Attachment not found") == true)
+    expect(error.errorDescription?.contains("Attachment not found") == true)
   } catch {
-    #expect(Bool(false))
+    expect(Bool(false))
   }
 
-  #expect(runnerCalled == false)
+  expect(runnerCalled == false)
 }
 
-@Test
-func messageSenderTreatsHandleIdentifierAsRecipient() throws {
+func testMessageSenderTreatsHandleIdentifierAsRecipient() throws {
   var captured: [String] = []
   let sender = MessageSender(runner: { _, args in
     captured = args
@@ -297,24 +282,24 @@ func messageSenderTreatsHandleIdentifierAsRecipient() throws {
       chatGUID: ""
     )
   )
-  #expect(captured[0] == "+16502530000")
-  #expect(captured[5].isEmpty)
-  #expect(captured[6] == "0")
+  expect(captured[0] == "+16502530000")
+  expect(captured[5].isEmpty)
+  expect(captured[6] == "0")
 }
 
-@Test
-func errorDescriptionsIncludeDetails() {
+func testErrorDescriptionsIncludeDetails() {
   let error = IMsgError.invalidService("weird")
-  #expect(error.errorDescription?.contains("Invalid service: weird") == true)
+  expect(error.errorDescription?.contains("Invalid service: weird") == true)
   let chatError = IMsgError.invalidChatTarget("bad")
-  #expect(chatError.errorDescription?.contains("Invalid chat target: bad") == true)
+  expect(chatError.errorDescription?.contains("Invalid chat target: bad") == true)
   let dateError = IMsgError.invalidISODate("2024-99-99")
-  #expect(dateError.errorDescription?.contains("Invalid ISO8601 date") == true)
+  expect(dateError.errorDescription?.contains("Invalid ISO8601 date") == true)
   let scriptError = IMsgError.appleScriptFailure("nope")
-  #expect(scriptError.errorDescription?.contains("AppleScript failed: nope") == true)
+  expect(scriptError.errorDescription?.contains("AppleScript failed: nope") == true)
   let underlying = NSError(domain: "Test", code: 1)
   let permission = IMsgError.permissionDenied(path: "/tmp/chat.db", underlying: underlying)
   let permissionDescription = permission.errorDescription ?? ""
-  #expect(permissionDescription.contains("Permission Error") == true)
-  #expect(permissionDescription.contains("/tmp/chat.db") == true)
+  expect(permissionDescription.contains("Permission Error") == true)
+  expect(permissionDescription.contains("/tmp/chat.db") == true)
+}
 }

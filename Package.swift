@@ -1,16 +1,16 @@
-// swift-tools-version: 6.0
+// swift-tools-version: 5.8
 import PackageDescription
 
 let package = Package(
     name: "imsg",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS(.v13)],
     products: [
         .library(name: "IMsgCore", targets: ["IMsgCore"]),
         .executable(name: "imsg", targets: ["imsg"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/steipete/Commander.git", from: "0.2.0"),
-        .package(url: "https://github.com/stephencelis/SQLite.swift.git", from: "0.15.4"),
+        .package(path: "Vendor/Commander"),
+        .package(url: "https://github.com/stephencelis/SQLite.swift.git", exact: "0.15.0"),
         .package(url: "https://github.com/marmelroy/PhoneNumberKit.git", from: "4.2.2"),
     ],
     targets: [

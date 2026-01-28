@@ -1,18 +1,17 @@
 import Foundation
-import Testing
+import XCTest
 
 @testable import IMsgCore
 @testable import imsg
 
-@Test
-func isGroupHandleFlagsGroup() {
-  #expect(isGroupHandle(identifier: "iMessage;+;chat123", guid: "") == true)
-  #expect(isGroupHandle(identifier: "", guid: "iMessage;-;chat999") == true)
-  #expect(isGroupHandle(identifier: "+1555", guid: "") == false)
+final class RPCPayloadsTests: XCTestCase {
+func testIsGroupHandleFlagsGroup() {
+  expect(isGroupHandle(identifier: "iMessage;+;chat123", guid: "") == true)
+  expect(isGroupHandle(identifier: "", guid: "iMessage;-;chat999") == true)
+  expect(isGroupHandle(identifier: "+1555", guid: "") == false)
 }
 
-@Test
-func chatPayloadIncludesParticipantsAndGroupFlag() {
+func testChatPayloadIncludesParticipantsAndGroupFlag() {
   let date = Date(timeIntervalSince1970: 0)
   let payload = chatPayload(
     id: 1,
@@ -23,14 +22,13 @@ func chatPayloadIncludesParticipantsAndGroupFlag() {
     lastMessageAt: date,
     participants: ["+111", "+222"]
   )
-  #expect(payload["id"] as? Int64 == 1)
-  #expect(payload["identifier"] as? String == "iMessage;+;chat123")
-  #expect(payload["is_group"] as? Bool == true)
-  #expect((payload["participants"] as? [String])?.count == 2)
+  expect(payload["id"] as? Int64 == 1)
+  expect(payload["identifier"] as? String == "iMessage;+;chat123")
+  expect(payload["is_group"] as? Bool == true)
+  expect((payload["participants"] as? [String])?.count == 2)
 }
 
-@Test
-func messagePayloadIncludesChatFields() {
+func testMessagePayloadIncludesChatFields() {
   let message = Message(
     rowID: 5,
     chatID: 10,
@@ -76,20 +74,19 @@ func messagePayloadIncludesChatFields() {
     attachments: [attachment],
     reactions: [reaction]
   )
-  #expect(payload["chat_id"] as? Int64 == 10)
-  #expect(payload["guid"] as? String == "msg-guid-5")
-  #expect(payload["reply_to_guid"] as? String == "msg-guid-1")
-  #expect(payload["chat_identifier"] as? String == "iMessage;+;chat123")
-  #expect(payload["chat_name"] as? String == "Group")
-  #expect(payload["is_group"] as? Bool == true)
-  #expect((payload["attachments"] as? [[String: Any]])?.count == 1)
-  #expect(
+  expect(payload["chat_id"] as? Int64 == 10)
+  expect(payload["guid"] as? String == "msg-guid-5")
+  expect(payload["reply_to_guid"] as? String == "msg-guid-1")
+  expect(payload["chat_identifier"] as? String == "iMessage;+;chat123")
+  expect(payload["chat_name"] as? String == "Group")
+  expect(payload["is_group"] as? Bool == true)
+  expect((payload["attachments"] as? [[String: Any]])?.count == 1)
+  expect(
     (payload["reactions"] as? [[String: Any]])?.first?["emoji"] as? String
       == ReactionType.like.emoji)
 }
 
-@Test
-func messagePayloadOmitsEmptyReplyToGuid() {
+func testMessagePayloadOmitsEmptyReplyToGuid() {
   let message = Message(
     rowID: 6,
     chatID: 10,
@@ -110,17 +107,17 @@ func messagePayloadOmitsEmptyReplyToGuid() {
     attachments: [],
     reactions: []
   )
-  #expect(payload["reply_to_guid"] == nil)
-  #expect(payload["guid"] as? String == "msg-guid-6")
+  expect(payload["reply_to_guid"] == nil)
+  expect(payload["guid"] as? String == "msg-guid-6")
 }
 
-@Test
-func paramParsingHelpers() {
-  #expect(stringParam(123 as NSNumber) == "123")
-  #expect(intParam("42") == 42)
-  #expect(int64Param(NSNumber(value: 9_223_372_036_854_775_000 as Int64)) != nil)
-  #expect(boolParam("true") == true)
-  #expect(boolParam("false") == false)
-  #expect(stringArrayParam("a,b , c").count == 3)
-  #expect(stringArrayParam(["x", "y"]).count == 2)
+func testParamParsingHelpers() {
+  expect(stringParam(123 as NSNumber) == "123")
+  expect(intParam("42") == 42)
+  expect(int64Param(NSNumber(value: 9_223_372_036_854_775_000 as Int64)) != nil)
+  expect(boolParam("true") == true)
+  expect(boolParam("false") == false)
+  expect(stringArrayParam("a,b , c").count == 3)
+  expect(stringArrayParam(["x", "y"]).count == 2)
+}
 }

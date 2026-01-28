@@ -1,6 +1,6 @@
 import Foundation
 import SQLite
-import Testing
+import XCTest
 
 @testable import IMsgCore
 
@@ -45,8 +45,8 @@ private enum WatcherTestDatabase {
   }
 }
 
-@Test
-func messageWatcherYieldsExistingMessages() async throws {
+final class MessageWatcherTests: XCTestCase {
+func testMessageWatcherYieldsExistingMessages() async throws {
   let store = try WatcherTestDatabase.makeStore()
   let watcher = MessageWatcher(store: store)
   let stream = watcher.stream(
@@ -61,5 +61,6 @@ func messageWatcherYieldsExistingMessages() async throws {
   }
 
   let message = try await task.value
-  #expect(message?.text == "hello")
+  expect(message?.text == "hello")
+}
 }

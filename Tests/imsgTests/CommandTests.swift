@@ -1,7 +1,7 @@
 import Commander
 import Foundation
 import SQLite
-import Testing
+import XCTest
 
 @testable import IMsgCore
 @testable import imsg
@@ -91,8 +91,8 @@ private enum CommandTestDatabase {
   }
 }
 
-@Test
-func chatsCommandRunsWithJsonOutput() async throws {
+final class CommandTests: XCTestCase {
+func testChatsCommandRunsWithJsonOutput() async throws {
   let path = try CommandTestDatabase.makePath()
   let values = ParsedValues(
     positional: [],
@@ -103,8 +103,7 @@ func chatsCommandRunsWithJsonOutput() async throws {
   try await ChatsCommand.spec.run(values, runtime)
 }
 
-@Test
-func historyCommandRunsWithChatID() async throws {
+func testHistoryCommandRunsWithChatID() async throws {
   let path = try CommandTestDatabase.makePath()
   let values = ParsedValues(
     positional: [],
@@ -115,8 +114,7 @@ func historyCommandRunsWithChatID() async throws {
   try await HistoryCommand.spec.run(values, runtime)
 }
 
-@Test
-func historyCommandRunsWithAttachmentsNonJson() async throws {
+func testHistoryCommandRunsWithAttachmentsNonJson() async throws {
   let path = try CommandTestDatabase.makePathWithAttachment()
   let values = ParsedValues(
     positional: [],
@@ -127,8 +125,7 @@ func historyCommandRunsWithAttachmentsNonJson() async throws {
   try await HistoryCommand.spec.run(values, runtime)
 }
 
-@Test
-func chatsCommandRunsWithPlainOutput() async throws {
+func testChatsCommandRunsWithPlainOutput() async throws {
   let path = try CommandTestDatabase.makePath()
   let values = ParsedValues(
     positional: [],
@@ -139,8 +136,7 @@ func chatsCommandRunsWithPlainOutput() async throws {
   try await ChatsCommand.spec.run(values, runtime)
 }
 
-@Test
-func sendCommandRejectsMissingRecipient() async {
+func testSendCommandRejectsMissingRecipient() async {
   let values = ParsedValues(
     positional: [],
     options: ["text": ["hi"]],
@@ -149,16 +145,15 @@ func sendCommandRejectsMissingRecipient() async {
   let runtime = RuntimeOptions(parsedValues: values)
   do {
     try await SendCommand.spec.run(values, runtime)
-    #expect(Bool(false))
+    expect(Bool(false))
   } catch let error as ParsedValuesError {
-    #expect(error.description.contains("Missing required option"))
+    expect(error.description.contains("Missing required option"))
   } catch {
-    #expect(Bool(false))
+    expect(Bool(false))
   }
 }
 
-@Test
-func sendCommandRunsWithStubSender() async throws {
+func testSendCommandRunsWithStubSender() async throws {
   let values = ParsedValues(
     positional: [],
     options: ["to": ["+15551234567"], "text": ["hi"]],
@@ -171,12 +166,11 @@ func sendCommandRunsWithStubSender() async throws {
     sendMessage: { options in
       captured = options
     })
-  #expect(captured?.recipient == "+15551234567")
-  #expect(captured?.text == "hi")
+  expect(captured?.recipient == "+15551234567")
+  expect(captured?.text == "hi")
 }
 
-@Test
-func sendCommandResolvesChatID() async throws {
+func testSendCommandResolvesChatID() async throws {
   let path = try CommandTestDatabase.makePath()
   let values = ParsedValues(
     positional: [],
@@ -190,13 +184,12 @@ func sendCommandResolvesChatID() async throws {
     sendMessage: { options in
       captured = options
     })
-  #expect(captured?.chatIdentifier == "+123")
-  #expect(captured?.chatGUID == "iMessage;+;chat123")
-  #expect(captured?.recipient.isEmpty == true)
+  expect(captured?.chatIdentifier == "+123")
+  expect(captured?.chatGUID == "iMessage;+;chat123")
+  expect(captured?.recipient.isEmpty == true)
 }
 
-@Test
-func watchCommandRejectsInvalidDebounce() async {
+func testWatchCommandRejectsInvalidDebounce() async {
   let values = ParsedValues(
     positional: [],
     options: ["debounce": ["nope"]],
@@ -205,16 +198,15 @@ func watchCommandRejectsInvalidDebounce() async {
   let runtime = RuntimeOptions(parsedValues: values)
   do {
     try await WatchCommand.spec.run(values, runtime)
-    #expect(Bool(false))
+    expect(Bool(false))
   } catch let error as ParsedValuesError {
-    #expect(error.description.contains("Invalid value"))
+    expect(error.description.contains("Invalid value"))
   } catch {
-    #expect(Bool(false))
+    expect(Bool(false))
   }
 }
 
-@Test
-func watchCommandRunsWithStubStream() async throws {
+func testWatchCommandRunsWithStubStream() async throws {
   let values = ParsedValues(
     positional: [],
     options: ["db": ["/tmp/unused"], "debounce": ["1ms"]],
@@ -259,8 +251,7 @@ func watchCommandRunsWithStubStream() async throws {
   )
 }
 
-@Test
-func watchCommandRunsWithJsonOutput() async throws {
+func testWatchCommandRunsWithJsonOutput() async throws {
   let values = ParsedValues(
     positional: [],
     options: ["db": ["/tmp/unused"], "debounce": ["1ms"]],
@@ -326,4 +317,5 @@ func watchCommandRunsWithJsonOutput() async throws {
     storeFactory: { _ in store },
     streamProvider: streamProvider
   )
+}
 }

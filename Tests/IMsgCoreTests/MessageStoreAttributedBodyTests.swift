@@ -1,11 +1,11 @@
 import Foundation
 import SQLite
-import Testing
+import XCTest
 
 @testable import IMsgCore
 
-@Test
-func messagesByChatUsesAttributedBodyFallback() throws {
+final class MessageStoreAttributedBodyTests: XCTestCase {
+func testMessagesByChatUsesAttributedBodyFallback() throws {
   let db = try Connection(.inMemory)
   try db.execute(
     """
@@ -64,12 +64,11 @@ func messagesByChatUsesAttributedBodyFallback() throws {
 
   let store = try MessageStore(connection: db, path: ":memory:")
   let messages = try store.messages(chatID: 1, limit: 10)
-  #expect(messages.count == 1)
-  #expect(messages.first?.text == "fallback text")
+  expect(messages.count == 1)
+  expect(messages.first?.text == "fallback text")
 }
 
-@Test
-func messagesByChatUsesLengthPrefixedAttributedBodyFallback() throws {
+func testMessagesByChatUsesLengthPrefixedAttributedBodyFallback() throws {
   let db = try Connection(.inMemory)
   try db.execute(
     """
@@ -129,12 +128,11 @@ func messagesByChatUsesLengthPrefixedAttributedBodyFallback() throws {
 
   let store = try MessageStore(connection: db, path: ":memory:")
   let messages = try store.messages(chatID: 1, limit: 10)
-  #expect(messages.count == 1)
-  #expect(messages.first?.text == "length prefixed")
+  expect(messages.count == 1)
+  expect(messages.first?.text == "length prefixed")
 }
 
-@Test
-func messagesAfterUsesAttributedBodyFallback() throws {
+func testMessagesAfterUsesAttributedBodyFallback() throws {
   let db = try Connection(.inMemory)
   try db.execute(
     """
@@ -176,6 +174,7 @@ func messagesAfterUsesAttributedBodyFallback() throws {
 
   let store = try MessageStore(connection: db, path: ":memory:")
   let messages = try store.messagesAfter(afterRowID: 0, chatID: nil, limit: 10)
-  #expect(messages.count == 1)
-  #expect(messages.first?.text == "new text")
+  expect(messages.count == 1)
+  expect(messages.first?.text == "new text")
+}
 }

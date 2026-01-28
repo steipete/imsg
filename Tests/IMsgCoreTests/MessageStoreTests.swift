@@ -1,29 +1,27 @@
 import Foundation
 import SQLite
-import Testing
+import XCTest
 
 @testable import IMsgCore
 
-@Test
-func listChatsReturnsChat() throws {
+final class MessageStoreTests: XCTestCase {
+func testListChatsReturnsChat() throws {
   let store = try TestDatabase.makeStore()
   let chats = try store.listChats(limit: 5)
-  #expect(chats.count == 1)
-  #expect(chats.first?.identifier == "+123")
+  expect(chats.count == 1)
+  expect(chats.first?.identifier == "+123")
 }
 
-@Test
-func chatInfoReturnsMetadata() throws {
+func testChatInfoReturnsMetadata() throws {
   let store = try TestDatabase.makeStore()
   let info = try store.chatInfo(chatID: 1)
-  #expect(info?.identifier == "+123")
-  #expect(info?.guid == "iMessage;+;chat123")
-  #expect(info?.name == "Test Chat")
-  #expect(info?.service == "iMessage")
+  expect(info?.identifier == "+123")
+  expect(info?.guid == "iMessage;+;chat123")
+  expect(info?.name == "Test Chat")
+  expect(info?.service == "iMessage")
 }
 
-@Test
-func participantsReturnsUniqueHandles() throws {
+func testParticipantsReturnsUniqueHandles() throws {
   let db = try Connection(.inMemory)
   try db.execute(
     """
@@ -49,26 +47,24 @@ func participantsReturnsUniqueHandles() throws {
 
   let store = try MessageStore(connection: db, path: ":memory:")
   let participants = try store.participants(chatID: 1)
-  #expect(participants.count == 2)
-  #expect(participants.contains("+123"))
-  #expect(participants.contains("me@icloud.com"))
+  expect(participants.count == 2)
+  expect(participants.contains("+123"))
+  expect(participants.contains("me@icloud.com"))
 }
 
-@Test
-func messagesByChatReturnsMessages() throws {
+func testMessagesByChatReturnsMessages() throws {
   let store = try TestDatabase.makeStore()
   let messages = try store.messages(chatID: 1, limit: 10)
-  #expect(messages.count == 3)
-  #expect(messages[1].isFromMe)
-  #expect(messages[0].attachmentsCount == 0)
+  expect(messages.count == 3)
+  expect(messages[1].isFromMe)
+  expect(messages[0].attachmentsCount == 0)
 }
 
-@Test
-func messagesByChatAppliesDateFilterBeforeLimit() throws {
+func testMessagesByChatAppliesDateFilterBeforeLimit() throws {
   let store = try TestDatabase.makeStore()
   let all = try store.messages(chatID: 1, limit: 10)
   let target = all.first { $0.rowID == 2 }
-  #expect(target != nil)
+  expect(target != nil)
 
   // Build a tight window around message 2's date so the filter matches it but not the newest message.
   guard let target else { return }
@@ -77,12 +73,11 @@ func messagesByChatAppliesDateFilterBeforeLimit() throws {
     endDate: target.date.addingTimeInterval(1)
   )
   let filtered = try store.messages(chatID: 1, limit: 1, filter: filter)
-  #expect(filtered.count == 1)
-  #expect(filtered.first?.rowID == 2)
+  expect(filtered.count == 1)
+  expect(filtered.first?.rowID == 2)
 }
 
-@Test
-func messagesByChatAppliesParticipantFilterBeforeLimit() throws {
+func testMessagesByChatAppliesParticipantFilterBeforeLimit() throws {
   let store = try TestDatabase.makeStore()
 
   // Insert a newer "from me" message so limit=1 would pick it unless filtering happens in SQL.
@@ -99,20 +94,18 @@ func messagesByChatAppliesParticipantFilterBeforeLimit() throws {
 
   let filter = MessageFilter(participants: ["+123"])
   let filtered = try store.messages(chatID: 1, limit: 1, filter: filter)
-  #expect(filtered.count == 1)
-  #expect(filtered.first?.sender == "+123")
+  expect(filtered.count == 1)
+  expect(filtered.first?.sender == "+123")
 }
 
-@Test
-func messagesAfterReturnsMessages() throws {
+func testMessagesAfterReturnsMessages() throws {
   let store = try TestDatabase.makeStore()
   let messages = try store.messagesAfter(afterRowID: 1, chatID: nil, limit: 10)
-  #expect(messages.count == 2)
-  #expect(messages.first?.rowID == 2)
+  expect(messages.count == 2)
+  expect(messages.first?.rowID == 2)
 }
 
-@Test
-func messagesAfterExcludesReactionRows() throws {
+func testMessagesAfterExcludesReactionRows() throws {
   let db = try Connection(.inMemory)
   try db.execute(
     """
@@ -164,14 +157,13 @@ func messagesAfterExcludesReactionRows() throws {
   let store = try MessageStore(connection: db, path: ":memory:")
   let messages = try store.messagesAfter(afterRowID: 0, chatID: 1, limit: 10)
   let rowIDs = messages.map { $0.rowID }
-  #expect(messages.count == 2)
-  #expect(rowIDs.contains(1))
-  #expect(rowIDs.contains(3))
-  #expect(rowIDs.contains(2) == false)
+  expect(messages.count == 2)
+  expect(rowIDs.contains(1))
+  expect(rowIDs.contains(3))
+  expect(rowIDs.contains(2) == false)
 }
 
-@Test
-func messagesExcludeReactionRows() throws {
+func testMessagesExcludeReactionRows() throws {
   let db = try Connection(.inMemory)
   try db.execute(
     """
@@ -214,12 +206,11 @@ func messagesExcludeReactionRows() throws {
 
   let store = try MessageStore(connection: db, path: ":memory:")
   let messages = try store.messages(chatID: 1, limit: 10)
-  #expect(messages.count == 1)
-  #expect(messages.first?.rowID == 1)
+  expect(messages.count == 1)
+  expect(messages.first?.rowID == 1)
 }
 
-@Test
-func messagesExposeReplyToGuid() throws {
+func testMessagesExposeReplyToGuid() throws {
   let db = try Connection(.inMemory)
   try db.execute(
     """
@@ -263,12 +254,11 @@ func messagesExposeReplyToGuid() throws {
   let store = try MessageStore(connection: db, path: ":memory:")
   let messages = try store.messages(chatID: 1, limit: 10)
   let reply = messages.first { $0.rowID == 2 }
-  #expect(reply?.guid == "msg-guid-2")
-  #expect(reply?.replyToGUID == "msg-guid-1")
+  expect(reply?.guid == "msg-guid-2")
+  expect(reply?.replyToGUID == "msg-guid-1")
 }
 
-@Test
-func messagesReplyToGuidHandlesNoPrefix() throws {
+func testMessagesReplyToGuidHandlesNoPrefix() throws {
   let db = try Connection(.inMemory)
   try db.execute(
     """
@@ -312,19 +302,17 @@ func messagesReplyToGuidHandlesNoPrefix() throws {
   let store = try MessageStore(connection: db, path: ":memory:")
   let messages = try store.messages(chatID: 1, limit: 10)
   let reply = messages.first { $0.rowID == 2 }
-  #expect(reply?.replyToGUID == "msg-guid-1")
+  expect(reply?.replyToGUID == "msg-guid-1")
 }
 
-@Test
-func attachmentsByMessageReturnsMetadata() throws {
+func testAttachmentsByMessageReturnsMetadata() throws {
   let store = try TestDatabase.makeStore()
   let attachments = try store.attachments(for: 2)
-  #expect(attachments.count == 1)
-  #expect(attachments.first?.mimeType == "application/octet-stream")
+  expect(attachments.count == 1)
+  expect(attachments.first?.mimeType == "application/octet-stream")
 }
 
-@Test
-func longRepeatedPatternMessage() throws {
+func testLongRepeatedPatternMessage() throws {
   // Test the exact pattern that causes crashes: repeated "aaaaaaaaaaaa " pattern
   // This reproduces the UInt8 overflow bug when segment.count > 256
   let db = try Connection(.inMemory)
@@ -390,7 +378,8 @@ func longRepeatedPatternMessage() throws {
 
   let store = try MessageStore(connection: db, path: ":memory:")
   let messages = try store.messages(chatID: 1, limit: 10)
-  #expect(messages.count == 1)
-  #expect(messages.first?.text == longText)
-  #expect(messages.first?.text.count == longText.count)
+  expect(messages.count == 1)
+  expect(messages.first?.text == longText)
+  expect(messages.first?.text.count == longText.count)
+}
 }
