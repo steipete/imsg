@@ -94,7 +94,8 @@ extension MessageStore {
             handleID: handleID,
             attachmentsCount: attachments,
             guid: guid,
-            replyToGUID: replyToGUID
+            replyToGUID: replyToGUID,
+            destinationCallerID: destinationCallerID.isEmpty ? nil : destinationCallerID
           ))
       }
       return messages
@@ -172,7 +173,8 @@ extension MessageStore {
             handleID: handleID,
             attachmentsCount: attachments,
             guid: guid,
-            replyToGUID: replyToGUID
+            replyToGUID: replyToGUID,
+            destinationCallerID: destinationCallerID.isEmpty ? nil : destinationCallerID
           ))
       }
       return messages

@@ -228,6 +228,10 @@ public struct Message: Sendable, Equatable {
   public let service: String
   public let handleID: Int64?
   public let attachmentsCount: Int
+  /// The destination_caller_id from the database. For messages where is_from_me is true,
+  /// this can help distinguish between messages actually sent by the local user vs
+  /// messages received on a secondary phone number registered with the same Apple ID.
+  public let destinationCallerID: String?
 
   public init(
     rowID: Int64,
@@ -240,7 +244,8 @@ public struct Message: Sendable, Equatable {
     handleID: Int64?,
     attachmentsCount: Int,
     guid: String = "",
-    replyToGUID: String? = nil
+    replyToGUID: String? = nil,
+    destinationCallerID: String? = nil
   ) {
     self.rowID = rowID
     self.chatID = chatID
@@ -253,6 +258,7 @@ public struct Message: Sendable, Equatable {
     self.service = service
     self.handleID = handleID
     self.attachmentsCount = attachmentsCount
+    self.destinationCallerID = destinationCallerID
   }
 }
 
