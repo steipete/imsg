@@ -51,6 +51,20 @@ func messagePayload(
   if let replyToGUID = message.replyToGUID, !replyToGUID.isEmpty {
     payload["reply_to_guid"] = replyToGUID
   }
+  // Add reaction event metadata if this message is a reaction
+  if message.isReaction {
+    payload["is_reaction"] = true
+    if let reactionType = message.reactionType {
+      payload["reaction_type"] = reactionType.name
+      payload["reaction_emoji"] = reactionType.emoji
+    }
+    if let isReactionAdd = message.isReactionAdd {
+      payload["is_reaction_add"] = isReactionAdd
+    }
+    if let reactedToGUID = message.reactedToGUID, !reactedToGUID.isEmpty {
+      payload["reacted_to_guid"] = reactedToGUID
+    }
+  }
   return payload
 }
 
