@@ -51,6 +51,9 @@ func messagePayload(
   if let replyToGUID = message.replyToGUID, !replyToGUID.isEmpty {
     payload["reply_to_guid"] = replyToGUID
   }
+  if let destinationCallerID = message.destinationCallerID, !destinationCallerID.isEmpty {
+    payload["destination_caller_id"] = destinationCallerID
+  }
   // Add reaction event metadata if this message is a reaction
   if message.isReaction {
     payload["is_reaction"] = true

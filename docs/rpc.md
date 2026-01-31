@@ -80,6 +80,7 @@ Result:
 - `chat_id` (always present; preferred handle for routing)
 - `guid` (string)
 - `reply_to_guid` (string, optional)
+- `destination_caller_id` (string, optional)
 - `sender`
 - `is_from_me`
 - `text`

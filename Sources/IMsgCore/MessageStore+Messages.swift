@@ -115,7 +115,8 @@ extension MessageStore {
             attachmentsCount: attachments,
             guid: guid,
             replyToGUID: replyToGUID,
-            threadOriginatorGUID: threadOriginatorGUID.isEmpty ? nil : threadOriginatorGUID
+            threadOriginatorGUID: threadOriginatorGUID.isEmpty ? nil : threadOriginatorGUID,
+            destinationCallerID: destinationCallerID.isEmpty ? nil : destinationCallerID
           ))
       }
       return messages
@@ -241,6 +242,7 @@ extension MessageStore {
             guid: guid,
             replyToGUID: replyToGUID,
             threadOriginatorGUID: threadOriginatorGUID.isEmpty ? nil : threadOriginatorGUID,
+            destinationCallerID: destinationCallerID.isEmpty ? nil : destinationCallerID,
             isReaction: isReactionEvent,
             reactionType: reactionType,
             isReactionAdd: isReactionAdd,

@@ -229,7 +229,11 @@ public struct Message: Sendable, Equatable {
   public let service: String
   public let handleID: Int64?
   public let attachmentsCount: Int
-  
+  /// The destination_caller_id from the database. For messages where is_from_me is true,
+  /// this can help distinguish between messages actually sent by the local user vs
+  /// messages received on a secondary phone number registered with the same Apple ID.
+  public let destinationCallerID: String?
+
   // Reaction metadata (populated when message is a reaction event)
   /// Whether this message is a reaction event (tapback add/remove)
   public let isReaction: Bool
@@ -253,6 +257,7 @@ public struct Message: Sendable, Equatable {
     guid: String = "",
     replyToGUID: String? = nil,
     threadOriginatorGUID: String? = nil,
+    destinationCallerID: String? = nil,
     isReaction: Bool = false,
     reactionType: ReactionType? = nil,
     isReactionAdd: Bool? = nil,
@@ -270,6 +275,7 @@ public struct Message: Sendable, Equatable {
     self.service = service
     self.handleID = handleID
     self.attachmentsCount = attachmentsCount
+    self.destinationCallerID = destinationCallerID
     self.isReaction = isReaction
     self.reactionType = reactionType
     self.isReactionAdd = isReactionAdd

@@ -37,7 +37,11 @@ struct MessagePayload: Codable {
   let createdAt: String
   let attachments: [AttachmentPayload]
   let reactions: [ReactionPayload]
-  
+  /// The destination_caller_id from the database. For messages where is_from_me is true,
+  /// this can help distinguish between messages actually sent by the local user vs
+  /// messages received on a secondary phone number registered with the same Apple ID.
+  let destinationCallerID: String?
+
   // Reaction event metadata (populated when this message is a reaction event)
   let isReaction: Bool?
   let reactionType: String?
@@ -57,6 +61,7 @@ struct MessagePayload: Codable {
     self.createdAt = CLIISO8601.format(message.date)
     self.attachments = attachments.map { AttachmentPayload(meta: $0) }
     self.reactions = reactions.map { ReactionPayload(reaction: $0) }
+    self.destinationCallerID = message.destinationCallerID
     
     // Reaction event metadata
     if message.isReaction {
@@ -86,6 +91,7 @@ struct MessagePayload: Codable {
     case createdAt = "created_at"
     case attachments
     case reactions
+    case destinationCallerID = "destination_caller_id"
     case isReaction = "is_reaction"
     case reactionType = "reaction_type"
     case reactionEmoji = "reaction_emoji"

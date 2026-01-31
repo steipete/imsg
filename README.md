@@ -55,9 +55,9 @@ imsg send --to "+14155551212" --text "hi" --file ~/Desktop/pic.jpg --service ime
 
 ## JSON output
 `imsg chats --json` emits one JSON object per chat with fields: `id`, `name`, `identifier`, `service`, `last_message_at`.
-`imsg history --json` and `imsg watch --json` emit one JSON object per message with fields: `id`, `chat_id`, `guid`, `reply_to_guid`, `sender`, `is_from_me`, `text`, `created_at`, `attachments` (array of metadata with `filename`, `transfer_name`, `uti`, `mime_type`, `total_bytes`, `is_sticker`, `original_path`, `missing`), `reactions`.
+`imsg history --json` and `imsg watch --json` emit one JSON object per message with fields: `id`, `chat_id`, `guid`, `reply_to_guid`, `destination_caller_id`, `sender`, `is_from_me`, `text`, `created_at`, `attachments` (array of metadata with `filename`, `transfer_name`, `uti`, `mime_type`, `total_bytes`, `is_sticker`, `original_path`, `missing`), `reactions`.
 
-Note: `reply_to_guid` and `reactions` are read-only metadata.
+Note: `reply_to_guid`, `destination_caller_id`, and `reactions` are read-only metadata.
 
 ## Permissions troubleshooting
 If you see “unable to open database file” or empty output:

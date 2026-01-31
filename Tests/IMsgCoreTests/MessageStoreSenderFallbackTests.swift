@@ -60,4 +60,5 @@ func messagesUseDestinationCallerIDWhenSenderMissing() throws {
   let store = try MessageStore(connection: db, path: ":memory:")
   let messages = try store.messages(chatID: 1, limit: 5)
   #expect(messages.first?.sender == "me@icloud.com")
+  #expect(messages.first?.destinationCallerID == "me@icloud.com")
 }

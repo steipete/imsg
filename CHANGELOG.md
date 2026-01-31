@@ -9,6 +9,7 @@
 - fix: apply history filters before limit (#20, thanks @tommybananas)
 - fix: flush watch output immediately when stdout is buffered (#43, thanks @ccaum)
 - feat: include `thread_originator_guid` in message output (#39, thanks @ruthmade)
+- feat: expose `destination_caller_id` in message output (#29, thanks @commander-alexander)
 - fix: detect groups from `;+;` prefix in guid/identifier for RPC payloads (#42, thanks @shivshil)
 
 ## 0.4.0 - 2026-01-07

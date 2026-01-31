@@ -43,7 +43,8 @@ func messagePayloadIncludesChatFields() {
     attachmentsCount: 1,
     guid: "msg-guid-5",
     replyToGUID: "msg-guid-1",
-    threadOriginatorGUID: "thread-guid-5"
+    threadOriginatorGUID: "thread-guid-5",
+    destinationCallerID: "me@icloud.com"
   )
   let chatInfo = ChatInfo(
     id: 10,
@@ -80,6 +81,7 @@ func messagePayloadIncludesChatFields() {
   #expect(payload["chat_id"] as? Int64 == 10)
   #expect(payload["guid"] as? String == "msg-guid-5")
   #expect(payload["reply_to_guid"] as? String == "msg-guid-1")
+  #expect(payload["destination_caller_id"] as? String == "me@icloud.com")
   #expect(payload["thread_originator_guid"] as? String == "thread-guid-5")
   #expect(payload["chat_identifier"] as? String == "iMessage;+;chat123")
   #expect(payload["chat_name"] as? String == "Group")
@@ -113,6 +115,7 @@ func messagePayloadOmitsEmptyReplyToGuid() {
     reactions: []
   )
   #expect(payload["reply_to_guid"] == nil)
+  #expect(payload["destination_caller_id"] == nil)
   #expect(payload["thread_originator_guid"] == nil)
   #expect(payload["guid"] as? String == "msg-guid-6")
 }
