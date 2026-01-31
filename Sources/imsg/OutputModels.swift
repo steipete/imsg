@@ -36,6 +36,13 @@ struct MessagePayload: Codable {
   let createdAt: String
   let attachments: [AttachmentPayload]
   let reactions: [ReactionPayload]
+  
+  // Reaction event metadata (populated when this message is a reaction event)
+  let isReaction: Bool?
+  let reactionType: String?
+  let reactionEmoji: String?
+  let isReactionAdd: Bool?
+  let reactedToGUID: String?
 
   init(message: Message, attachments: [AttachmentMeta], reactions: [Reaction] = []) {
     self.id = message.rowID
@@ -48,6 +55,21 @@ struct MessagePayload: Codable {
     self.createdAt = CLIISO8601.format(message.date)
     self.attachments = attachments.map { AttachmentPayload(meta: $0) }
     self.reactions = reactions.map { ReactionPayload(reaction: $0) }
+    
+    // Reaction event metadata
+    if message.isReaction {
+      self.isReaction = true
+      self.reactionType = message.reactionType?.name
+      self.reactionEmoji = message.reactionType?.emoji
+      self.isReactionAdd = message.isReactionAdd
+      self.reactedToGUID = message.reactedToGUID
+    } else {
+      self.isReaction = nil
+      self.reactionType = nil
+      self.reactionEmoji = nil
+      self.isReactionAdd = nil
+      self.reactedToGUID = nil
+    }
   }
 
   enum CodingKeys: String, CodingKey {
@@ -61,6 +83,11 @@ struct MessagePayload: Codable {
     case createdAt = "created_at"
     case attachments
     case reactions
+    case isReaction = "is_reaction"
+    case reactionType = "reaction_type"
+    case reactionEmoji = "reaction_emoji"
+    case isReactionAdd = "is_reaction_add"
+    case reactedToGUID = "reacted_to_guid"
   }
 }
 

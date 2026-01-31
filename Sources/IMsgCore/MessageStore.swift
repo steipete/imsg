@@ -344,7 +344,7 @@ extension MessageStore {
   }
 
   /// Extract custom emoji from reaction message text like "Reacted 🎉 to "original message""
-  private func extractCustomEmoji(from text: String) -> String? {
+  func extractCustomEmoji(from text: String) -> String? {
     // Format: "Reacted X to "..." where X is the emoji. Fallback to first emoji in text.
     guard
       let reactedRange = text.range(of: "Reacted "),

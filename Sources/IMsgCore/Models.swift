@@ -228,6 +228,16 @@ public struct Message: Sendable, Equatable {
   public let service: String
   public let handleID: Int64?
   public let attachmentsCount: Int
+  
+  // Reaction metadata (populated when message is a reaction event)
+  /// Whether this message is a reaction event (tapback add/remove)
+  public let isReaction: Bool
+  /// The type of reaction (only set when isReaction is true)
+  public let reactionType: ReactionType?
+  /// Whether this is adding (true) or removing (false) a reaction (only set when isReaction is true)
+  public let isReactionAdd: Bool?
+  /// The GUID of the message being reacted to (only set when isReaction is true)
+  public let reactedToGUID: String?
 
   public init(
     rowID: Int64,
@@ -240,7 +250,11 @@ public struct Message: Sendable, Equatable {
     handleID: Int64?,
     attachmentsCount: Int,
     guid: String = "",
-    replyToGUID: String? = nil
+    replyToGUID: String? = nil,
+    isReaction: Bool = false,
+    reactionType: ReactionType? = nil,
+    isReactionAdd: Bool? = nil,
+    reactedToGUID: String? = nil
   ) {
     self.rowID = rowID
     self.chatID = chatID
@@ -253,6 +267,10 @@ public struct Message: Sendable, Equatable {
     self.service = service
     self.handleID = handleID
     self.attachmentsCount = attachmentsCount
+    self.isReaction = isReaction
+    self.reactionType = reactionType
+    self.isReactionAdd = isReactionAdd
+    self.reactedToGUID = reactedToGUID
   }
 }
 

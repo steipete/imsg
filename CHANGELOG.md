@@ -2,6 +2,9 @@
 
 ## 0.4.1 - Unreleased
 
+- feat: `--reactions` flag for `watch` command to include tapback events in stream (#26)
+- feat: reaction events include `is_reaction`, `reaction_type`, `reaction_emoji`, `is_reaction_add`, `reacted_to_guid` fields
+- feat: `imsg react` command to send tapback reactions via UI automation (#24)
 - fix: prefer handle sends when chat identifier is a direct handle
 - fix: apply history filters before limit (#20, thanks @tommybananas)
 

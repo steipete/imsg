@@ -4,10 +4,13 @@ import Foundation
 public struct MessageWatcherConfiguration: Sendable, Equatable {
   public var debounceInterval: TimeInterval
   public var batchLimit: Int
+  /// When true, reaction events (tapback add/remove) are included in the stream
+  public var includeReactions: Bool
 
-  public init(debounceInterval: TimeInterval = 0.25, batchLimit: Int = 100) {
+  public init(debounceInterval: TimeInterval = 0.25, batchLimit: Int = 100, includeReactions: Bool = false) {
     self.debounceInterval = debounceInterval
     self.batchLimit = batchLimit
+    self.includeReactions = includeReactions
   }
 }
 
@@ -128,7 +131,8 @@ private final class WatchState: @unchecked Sendable {
       let messages = try store.messagesAfter(
         afterRowID: cursor,
         chatID: chatID,
-        limit: configuration.batchLimit
+        limit: configuration.batchLimit,
+        includeReactions: configuration.includeReactions
       )
       for message in messages {
         continuation.yield(message)

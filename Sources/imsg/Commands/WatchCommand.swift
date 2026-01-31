@@ -26,6 +26,10 @@ enum WatchCommand {
         flags: [
           .make(
             label: "attachments", names: [.long("attachments")], help: "include attachment metadata"
+          ),
+          .make(
+            label: "reactions", names: [.long("reactions")], 
+            help: "include reaction events (tapback add/remove) in the stream"
           )
         ]
       )
@@ -60,6 +64,7 @@ enum WatchCommand {
     }
     let sinceRowID = values.optionInt64("sinceRowID")
     let showAttachments = values.flag("attachments")
+    let includeReactions = values.flag("reactions")
     let participants = values.optionValues("participants")
       .flatMap { $0.split(separator: ",").map { String($0) } }
       .filter { !$0.isEmpty }
@@ -73,7 +78,8 @@ enum WatchCommand {
     let watcher = MessageWatcher(store: store)
     let config = MessageWatcherConfiguration(
       debounceInterval: debounceInterval,
-      batchLimit: 100
+      batchLimit: 100,
+      includeReactions: includeReactions
     )
 
     let stream = streamProvider(watcher, chatID, sinceRowID, config)
@@ -94,6 +100,15 @@ enum WatchCommand {
       }
       let direction = message.isFromMe ? "sent" : "recv"
       let timestamp = CLIISO8601.format(message.date)
+      
+      // Format reaction events differently
+      if message.isReaction, let reactionType = message.reactionType {
+        let action = (message.isReactionAdd ?? true) ? "added" : "removed"
+        let targetGUID = message.reactedToGUID ?? "unknown"
+        Swift.print("\(timestamp) [\(direction)] \(message.sender) \(action) \(reactionType.emoji) reaction to \(targetGUID)")
+        continue
+      }
+      
       Swift.print("\(timestamp) [\(direction)] \(message.sender): \(message.text)")
       if message.attachmentsCount > 0 {
         if showAttachments {

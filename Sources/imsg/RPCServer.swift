@@ -128,12 +128,13 @@ final class RPCServer {
         let startISO = stringParam(params["start"])
         let endISO = stringParam(params["end"])
         let includeAttachments = boolParam(params["attachments"]) ?? false
+        let includeReactions = boolParam(params["include_reactions"]) ?? false
         let filter = try MessageFilter.fromISO(
           participants: participants,
           startISO: startISO,
           endISO: endISO
         )
-        let config = MessageWatcherConfiguration()
+        let config = MessageWatcherConfiguration(includeReactions: includeReactions)
         let subID = nextSubscriptionID
         nextSubscriptionID += 1
         let localStore = store
