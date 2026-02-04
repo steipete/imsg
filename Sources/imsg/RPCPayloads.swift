@@ -51,6 +51,9 @@ func messagePayload(
   if let replyToGUID = message.replyToGUID, !replyToGUID.isEmpty {
     payload["reply_to_guid"] = replyToGUID
   }
+  if let threadOriginatorGUID = message.threadOriginatorGUID, !threadOriginatorGUID.isEmpty {
+    payload["thread_originator_guid"] = threadOriginatorGUID
+  }
   return payload
 }
 
