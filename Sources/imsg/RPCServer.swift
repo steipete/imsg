@@ -187,6 +187,10 @@ final class RPCServer {
         respond(id: id, result: ["ok": true])
       case "send":
         try handleSend(params: params, id: id)
+      case "typing.start":
+        try handleTyping(params: params, id: id, start: true)
+      case "typing.stop":
+        try handleTyping(params: params, id: id, start: false)
       default:
         output.sendError(id: id, error: RPCError.methodNotFound(method))
       }
@@ -210,6 +214,38 @@ final class RPCServer {
   private func respond(id: Any?, result: Any) {
     guard let id else { return }
     output.sendResponse(id: id, result: result)
+  }
+
+  private func handleTyping(params: [String: Any], id: Any?, start: Bool) throws {
+    let chatIdentifier = stringParam(params["chat_identifier"]) ?? ""
+    let chatGUID = stringParam(params["chat_guid"]) ?? ""
+    let recipient = stringParam(params["to"]) ?? ""
+
+    var resolved = chatGUID.isEmpty ? chatIdentifier : chatGUID
+    if resolved.isEmpty && !recipient.isEmpty {
+      let service = stringParam(params["service"]) ?? "iMessage"
+      let svc = service.lowercased() == "sms" ? "SMS" : "iMessage"
+      resolved = "\(svc);-;\(recipient)"
+    }
+
+    if let chatID = int64Param(params["chat_id"]) {
+      if let info = try cache.info(chatID: chatID) {
+        resolved = info.guid.isEmpty ? info.identifier : info.guid
+      } else {
+        throw RPCError.invalidParams("unknown chat_id \(chatID)")
+      }
+    }
+
+    if resolved.isEmpty {
+      throw RPCError.invalidParams("to, chat_identifier, chat_guid, or chat_id is required")
+    }
+
+    if start {
+      try TypingIndicator.startTyping(chatIdentifier: resolved)
+    } else {
+      try TypingIndicator.stopTyping(chatIdentifier: resolved)
+    }
+    respond(id: id, result: ["ok": true])
   }
 
   private func handleSend(params: [String: Any], id: Any?) throws {
