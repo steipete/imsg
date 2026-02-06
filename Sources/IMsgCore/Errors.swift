@@ -6,6 +6,7 @@ public enum IMsgError: LocalizedError, Sendable {
   case invalidService(String)
   case invalidChatTarget(String)
   case appleScriptFailure(String)
+  case typingIndicatorFailed(String)
 
   public var errorDescription: String? {
     switch self {
@@ -34,6 +35,8 @@ public enum IMsgError: LocalizedError, Sendable {
       return "Invalid chat target: \(value)"
     case .appleScriptFailure(let message):
       return "AppleScript failed: \(message)"
+    case .typingIndicatorFailed(let message):
+      return "Typing indicator failed: \(message)"
     }
   }
 }
