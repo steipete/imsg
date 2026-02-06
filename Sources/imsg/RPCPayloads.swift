@@ -96,8 +96,7 @@ func reactionPayload(_ reaction: Reaction) -> [String: Any] {
 }
 
 func isGroupHandle(identifier: String, guid: String) -> Bool {
-  let handle = identifier.isEmpty ? guid : identifier
-  return handle.contains(";+;") || handle.contains(";-;")
+  return guid.contains(";+;") || identifier.contains(";+;")
 }
 
 func stringParam(_ value: Any?) -> String? {
