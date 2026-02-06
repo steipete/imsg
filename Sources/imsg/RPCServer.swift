@@ -15,12 +15,20 @@ final class RPCServer {
   private let subscriptions = SubscriptionStore()
   private let verbose: Bool
   private let sendMessage: (MessageSendOptions) throws -> Void
+  private let startTyping: (String) throws -> Void
+  private let stopTyping: (String) throws -> Void
 
   init(
     store: MessageStore,
     verbose: Bool,
     output: RPCOutput = RPCWriter(),
-    sendMessage: @escaping (MessageSendOptions) throws -> Void = { try MessageSender().send($0) }
+    sendMessage: @escaping (MessageSendOptions) throws -> Void = { try MessageSender().send($0) },
+    startTyping: @escaping (String) throws -> Void = {
+      try TypingIndicator.startTyping(chatIdentifier: $0)
+    },
+    stopTyping: @escaping (String) throws -> Void = {
+      try TypingIndicator.stopTyping(chatIdentifier: $0)
+    }
   ) {
     self.store = store
     self.watcher = MessageWatcher(store: store)
@@ -28,6 +36,8 @@ final class RPCServer {
     self.verbose = verbose
     self.output = output
     self.sendMessage = sendMessage
+    self.startTyping = startTyping
+    self.stopTyping = stopTyping
   }
 
   func run() async throws {
@@ -83,6 +93,10 @@ final class RPCServer {
         try await handleWatchUnsubscribe(id: id, params: params)
       case "send":
         try await handleSend(params: params, id: id)
+      case "typing.start":
+        try await handleTyping(params: params, id: id, start: true)
+      case "typing.stop":
+        try await handleTyping(params: params, id: id, start: false)
       default:
         output.sendError(id: id, error: RPCError.methodNotFound(method))
       }
@@ -231,6 +245,45 @@ final class RPCServer {
     }
     if let task = await subscriptions.remove(subID) {
       task.cancel()
+    }
+    respond(id: id, result: ["ok": true])
+  }
+
+  private func handleTyping(params: [String: Any], id: Any?, start: Bool) async throws {
+    let chatIdentifier = stringParam(params["chat_identifier"]) ?? ""
+    let chatGUID = stringParam(params["chat_guid"]) ?? ""
+    let recipient = stringParam(params["to"]) ?? ""
+    let chatID = int64Param(params["chat_id"])
+    let hasChatTarget = chatID != nil || !chatIdentifier.isEmpty || !chatGUID.isEmpty
+    if hasChatTarget && !recipient.isEmpty {
+      throw RPCError.invalidParams("use to or chat_*; not both")
+    }
+    if !hasChatTarget && recipient.isEmpty {
+      throw RPCError.invalidParams("to is required for direct typing")
+    }
+
+    let serviceRaw = stringParam(params["service"]) ?? "imessage"
+    guard let service = MessageService(rawValue: serviceRaw.lowercased()) else {
+      throw RPCError.invalidParams("invalid service")
+    }
+
+    var resolved = chatGUID.isEmpty ? chatIdentifier : chatGUID
+    if let chatID {
+      if let info = try await cache.info(chatID: chatID) {
+        resolved = info.guid.isEmpty ? info.identifier : info.guid
+      } else {
+        throw RPCError.invalidParams("unknown chat_id \(chatID)")
+      }
+    }
+    if resolved.isEmpty {
+      let svc = service == .sms ? "SMS" : "iMessage"
+      resolved = "\(svc);-;\(recipient)"
+    }
+
+    if start {
+      try startTyping(resolved)
+    } else {
+      try stopTyping(resolved)
     }
     respond(id: id, result: ["ok": true])
   }
