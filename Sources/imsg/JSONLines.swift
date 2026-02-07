@@ -16,6 +16,7 @@ enum JSONLines {
     let line = try encode(value)
     if !line.isEmpty {
       Swift.print(line)
+      fflush(stdout)
     }
   }
 }
