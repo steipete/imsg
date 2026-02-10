@@ -23,6 +23,9 @@ enum SendCommand {
           .make(
             label: "region", names: [.long("region")],
             help: "default region for phone normalization"),
+          .make(
+            label: "effect", names: [.long("effect")],
+            help: "message effect: \(MessageEffect.allNames.joined(separator: "|"))"),
         ]
       )
     ),
@@ -30,6 +33,7 @@ enum SendCommand {
       "imsg send --to +14155551212 --text \"hi\"",
       "imsg send --to +14155551212 --text \"hi\" --file ~/Desktop/pic.jpg --service imessage",
       "imsg send --chat-id 1 --text \"hi\"",
+      "imsg send --to +14155551212 --text \"wow!\" --effect fireworks",
     ]
   ) { values, runtime in
     try await run(values: values, runtime: runtime)
@@ -65,6 +69,14 @@ enum SendCommand {
     }
     let region = values.option("region") ?? "US"
 
+    var effect: MessageEffect?
+    if let effectName = values.option("effect") {
+      guard let parsed = MessageEffect(name: effectName) else {
+        throw ParsedValuesError.invalidOption("effect")
+      }
+      effect = parsed
+    }
+
     var resolvedChatIdentifier = chatIdentifier
     var resolvedChatGUID = chatGUID
     if let chatID {
@@ -87,7 +99,8 @@ enum SendCommand {
         service: service,
         region: region,
         chatIdentifier: resolvedChatIdentifier,
-        chatGUID: resolvedChatGUID
+        chatGUID: resolvedChatGUID,
+        effect: effect
       ))
 
     if runtime.jsonOutput {

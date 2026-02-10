@@ -15,6 +15,7 @@ public struct MessageSendOptions: Sendable {
   public var region: String
   public var chatIdentifier: String
   public var chatGUID: String
+  public var effect: MessageEffect?
 
   public init(
     recipient: String,
@@ -23,7 +24,8 @@ public struct MessageSendOptions: Sendable {
     service: MessageService = .auto,
     region: String = "US",
     chatIdentifier: String = "",
-    chatGUID: String = ""
+    chatGUID: String = "",
+    effect: MessageEffect? = nil
   ) {
     self.recipient = recipient
     self.text = text
@@ -32,6 +34,7 @@ public struct MessageSendOptions: Sendable {
     self.region = region
     self.chatIdentifier = chatIdentifier
     self.chatGUID = chatGUID
+    self.effect = effect
   }
 }
 
@@ -69,6 +72,17 @@ public struct MessageSender {
       if resolved.region.isEmpty { resolved.region = "US" }
       resolved.recipient = normalizer.normalize(resolved.recipient, region: resolved.region)
       if resolved.service == .auto { resolved.service = .imessage }
+    }
+
+    if let effect = resolved.effect, !resolved.text.isEmpty {
+      let chatID = !chatTarget.isEmpty ? chatTarget : resolved.chatIdentifier
+      try IMCoreBridge.sendMessageWithEffect(
+        chatIdentifier: chatID,
+        handle: resolved.recipient,
+        text: resolved.text,
+        effectID: effect.effectID
+      )
+      return
     }
 
     if resolved.attachmentPath.isEmpty == false {

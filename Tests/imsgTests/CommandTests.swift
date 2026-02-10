@@ -196,6 +196,44 @@ func sendCommandResolvesChatID() async throws {
 }
 
 @Test
+func sendCommandParsesEffectFlag() async throws {
+  let values = ParsedValues(
+    positional: [],
+    options: ["to": ["+15551234567"], "text": ["wow!"], "effect": ["fireworks"]],
+    flags: []
+  )
+  let runtime = RuntimeOptions(parsedValues: values)
+  var captured: MessageSendOptions?
+  try await SendCommand.run(
+    values: values, runtime: runtime,
+    sendMessage: { options in
+      captured = options
+    })
+  #expect(captured?.effect == .fireworks)
+  #expect(captured?.text == "wow!")
+}
+
+@Test
+func sendCommandRejectsInvalidEffect() async {
+  let values = ParsedValues(
+    positional: [],
+    options: ["to": ["+15551234567"], "text": ["hi"], "effect": ["bogus"]],
+    flags: []
+  )
+  let runtime = RuntimeOptions(parsedValues: values)
+  do {
+    try await SendCommand.run(
+      values: values, runtime: runtime,
+      sendMessage: { _ in })
+    #expect(Bool(false))
+  } catch let error as ParsedValuesError {
+    #expect(error.description.contains("Invalid"))
+  } catch {
+    #expect(Bool(false))
+  }
+}
+
+@Test
 func watchCommandRejectsInvalidDebounce() async {
   let values = ParsedValues(
     positional: [],

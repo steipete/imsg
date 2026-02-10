@@ -1,10 +1,12 @@
 import Foundation
 import PhoneNumberKit
 
-final class PhoneNumberNormalizer {
+public final class PhoneNumberNormalizer {
   private let phoneNumberUtility = PhoneNumberUtility()
 
-  func normalize(_ input: String, region: String) -> String {
+  public init() {}
+
+  public func normalize(_ input: String, region: String) -> String {
     do {
       let number = try phoneNumberUtility.parse(input, withRegion: region, ignoreType: true)
       return phoneNumberUtility.format(number, toType: .e164)
