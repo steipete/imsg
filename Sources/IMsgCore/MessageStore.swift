@@ -88,18 +88,29 @@ public final class MessageStore: @unchecked Sendable {
   }
 
   public func listChats(limit: Int) throws -> [Chat] {
+    // Use a correlated subquery instead of JOIN + GROUP BY to avoid
+    // materializing millions of intermediate join rows in memory.
+    // The original query joined chat × chat_message_join × message and
+    // grouped the entire result, which caused SQLite to build a massive
+    // temp B-tree that could spike memory enough for macOS jetsam to
+    // SIGKILL the process (see #47).
     let sql = """
-      SELECT c.ROWID, IFNULL(c.display_name, c.chat_identifier) AS name, c.chat_identifier, c.service_name,
-             MAX(m.date) AS last_date
+      SELECT c.ROWID,
+             IFNULL(c.display_name, c.chat_identifier) AS name,
+             c.chat_identifier,
+             c.service_name,
+             (SELECT MAX(m.date)
+              FROM chat_message_join cmj
+              JOIN message m ON m.ROWID = cmj.message_id
+              WHERE cmj.chat_id = c.ROWID) AS last_date
       FROM chat c
-      JOIN chat_message_join cmj ON c.ROWID = cmj.chat_id
-      JOIN message m ON m.ROWID = cmj.message_id
-      GROUP BY c.ROWID
+      WHERE last_date IS NOT NULL
       ORDER BY last_date DESC
       LIMIT ?
       """
     return try withConnection { db in
       var chats: [Chat] = []
+      chats.reserveCapacity(min(limit, 200))
       for row in try db.prepare(sql, limit) {
         let id = int64Value(row[0]) ?? 0
         let name = stringValue(row[1])
