@@ -13,7 +13,8 @@ extension MessageStore {
     let associatedTypeColumn = hasReactionColumns ? "m.associated_message_type" : "NULL"
     let destinationCallerColumn = hasDestinationCallerID ? "m.destination_caller_id" : "NULL"
     let audioMessageColumn = hasAudioMessageColumn ? "m.is_audio_message" : "0"
-    let threadOriginatorColumn = hasReactionColumns ? "m.thread_originator_guid" : "NULL"
+    let threadOriginatorColumn =
+      hasThreadOriginatorGUIDColumn ? "m.thread_originator_guid" : "NULL"
     let reactionFilter =
       hasReactionColumns
       ? " AND (m.associated_message_type IS NULL OR m.associated_message_type < 2000 OR m.associated_message_type > 3006)"
@@ -112,7 +113,8 @@ extension MessageStore {
     let associatedTypeColumn = hasReactionColumns ? "m.associated_message_type" : "NULL"
     let destinationCallerColumn = hasDestinationCallerID ? "m.destination_caller_id" : "NULL"
     let audioMessageColumn = hasAudioMessageColumn ? "m.is_audio_message" : "0"
-    let threadOriginatorColumn = hasReactionColumns ? "m.thread_originator_guid" : "NULL"
+    let threadOriginatorColumn =
+      hasThreadOriginatorGUIDColumn ? "m.thread_originator_guid" : "NULL"
     let reactionFilter =
       hasReactionColumns
       ? " AND (m.associated_message_type IS NULL OR m.associated_message_type < 2000 OR m.associated_message_type > 3006)"

@@ -2,6 +2,22 @@ import Foundation
 import SQLite
 
 extension MessageStore {
+  static func detectThreadOriginatorGUIDColumn(connection: Connection) -> Bool {
+    do {
+      let rows = try connection.prepare("PRAGMA table_info(message)")
+      for row in rows {
+        if let name = row[1] as? String,
+          name.caseInsensitiveCompare("thread_originator_guid") == .orderedSame
+        {
+          return true
+        }
+      }
+    } catch {
+      return false
+    }
+    return false
+  }
+
   static func detectAttributedBody(connection: Connection) -> Bool {
     do {
       let rows = try connection.prepare("PRAGMA table_info(message)")

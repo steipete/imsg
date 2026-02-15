@@ -16,6 +16,7 @@ public final class MessageStore: @unchecked Sendable {
   private let queueKey = DispatchSpecificKey<Void>()
   let hasAttributedBody: Bool
   let hasReactionColumns: Bool
+  let hasThreadOriginatorGUIDColumn: Bool
   let hasDestinationCallerID: Bool
   let hasAudioMessageColumn: Bool
   let hasAttachmentUserInfo: Bool
@@ -32,6 +33,9 @@ public final class MessageStore: @unchecked Sendable {
       self.connection.busyTimeout = 5
       self.hasAttributedBody = MessageStore.detectAttributedBody(connection: self.connection)
       self.hasReactionColumns = MessageStore.detectReactionColumns(connection: self.connection)
+      self.hasThreadOriginatorGUIDColumn = MessageStore.detectThreadOriginatorGUIDColumn(
+        connection: self.connection
+      )
       self.hasDestinationCallerID = MessageStore.detectDestinationCallerID(
         connection: self.connection
       )
@@ -51,6 +55,7 @@ public final class MessageStore: @unchecked Sendable {
     path: String,
     hasAttributedBody: Bool? = nil,
     hasReactionColumns: Bool? = nil,
+    hasThreadOriginatorGUIDColumn: Bool? = nil,
     hasDestinationCallerID: Bool? = nil,
     hasAudioMessageColumn: Bool? = nil,
     hasAttachmentUserInfo: Bool? = nil
@@ -69,6 +74,13 @@ public final class MessageStore: @unchecked Sendable {
       self.hasReactionColumns = hasReactionColumns
     } else {
       self.hasReactionColumns = MessageStore.detectReactionColumns(connection: connection)
+    }
+    if let hasThreadOriginatorGUIDColumn {
+      self.hasThreadOriginatorGUIDColumn = hasThreadOriginatorGUIDColumn
+    } else {
+      self.hasThreadOriginatorGUIDColumn = MessageStore.detectThreadOriginatorGUIDColumn(
+        connection: connection
+      )
     }
     if let hasDestinationCallerID {
       self.hasDestinationCallerID = hasDestinationCallerID

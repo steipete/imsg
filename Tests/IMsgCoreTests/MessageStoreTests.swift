@@ -316,6 +316,50 @@ func messagesReplyToGuidHandlesNoPrefix() throws {
 }
 
 @Test
+func messagesExposeThreadOriginatorGuidWhenAvailable() throws {
+  let db = try Connection(.inMemory)
+  try db.execute(
+    """
+    CREATE TABLE message (
+      ROWID INTEGER PRIMARY KEY,
+      handle_id INTEGER,
+      text TEXT,
+      guid TEXT,
+      associated_message_guid TEXT,
+      associated_message_type INTEGER,
+      thread_originator_guid TEXT,
+      date INTEGER,
+      is_from_me INTEGER,
+      service TEXT
+    );
+    """
+  )
+  try db.execute("CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT);")
+  try db.execute("CREATE TABLE chat_message_join (chat_id INTEGER, message_id INTEGER);")
+  try db.execute(
+    "CREATE TABLE message_attachment_join (message_id INTEGER, attachment_id INTEGER);")
+
+  let now = Date()
+  try db.run("INSERT INTO handle(ROWID, id) VALUES (1, '+123')")
+  try db.run(
+    """
+    INSERT INTO message(
+      ROWID, handle_id, text, guid, associated_message_guid, associated_message_type,
+      thread_originator_guid, date, is_from_me, service
+    )
+    VALUES (1, 1, 'hello', 'msg-guid-1', NULL, 0, 'thread-guid-1', ?, 0, 'iMessage')
+    """,
+    TestDatabase.appleEpoch(now)
+  )
+  try db.run("INSERT INTO chat_message_join(chat_id, message_id) VALUES (1, 1)")
+
+  let store = try MessageStore(connection: db, path: ":memory:")
+  let messages = try store.messages(chatID: 1, limit: 10)
+  let message = messages.first { $0.rowID == 1 }
+  #expect(message?.threadOriginatorGUID == "thread-guid-1")
+}
+
+@Test
 func attachmentsByMessageReturnsMetadata() throws {
   let store = try TestDatabase.makeStore()
   let attachments = try store.attachments(for: 2)

@@ -4,6 +4,7 @@
 
 - fix: prefer handle sends when chat identifier is a direct handle
 - fix: apply history filters before limit (#20, thanks @tommybananas)
+- feat: include `thread_originator_guid` in message output (#39, thanks @ruthmade)
 
 ## 0.4.0 - 2026-01-07
 - feat: surface audio message transcriptions (thanks @antons)
