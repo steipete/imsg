@@ -13,6 +13,9 @@ enum StdoutWriter {
   static func writeLine(_ line: String) {
     queue.sync {
       FileHandle.standardOutput.write(Data((line + "\n").utf8))
+      // Flush immediately to ensure real-time delivery of RPC notifications
+      // Without this, writes are buffered and may be delayed by minutes
+      try? FileHandle.standardOutput.synchronize()
     }
   }
 
