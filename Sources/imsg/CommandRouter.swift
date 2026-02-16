@@ -33,7 +33,7 @@ struct CommandRouter {
   func run(argv: [String]) async -> Int32 {
     let argv = normalizeArguments(argv)
     if argv.contains("--version") || argv.contains("-V") {
-      Swift.print(version)
+      StdoutWriter.writeLine(version)
       return 0
     }
     if argv.count <= 1 || argv.contains("--help") || argv.contains("-h") {
@@ -46,7 +46,7 @@ struct CommandRouter {
       guard let commandName = invocation.path.last,
         let spec = specs.first(where: { $0.name == commandName })
       else {
-        Swift.print("Unknown command")
+        StdoutWriter.writeLine("Unknown command")
         HelpPrinter.printRoot(version: version, rootName: rootName, commands: specs)
         return 1
       }
@@ -55,17 +55,17 @@ struct CommandRouter {
         try await spec.run(invocation.parsedValues, runtime)
         return 0
       } catch {
-        Swift.print(error)
+        StdoutWriter.writeLine(String(describing: error))
         return 1
       }
     } catch let error as CommanderProgramError {
-      Swift.print(error.description)
+      StdoutWriter.writeLine(error.description)
       if case .missingSubcommand = error {
         HelpPrinter.printRoot(version: version, rootName: rootName, commands: specs)
       }
       return 1
     } catch {
-      Swift.print(error)
+      StdoutWriter.writeLine(String(describing: error))
       return 1
     }
   }

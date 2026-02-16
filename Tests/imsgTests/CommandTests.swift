@@ -100,7 +100,9 @@ func chatsCommandRunsWithJsonOutput() async throws {
     flags: ["jsonOutput"]
   )
   let runtime = RuntimeOptions(parsedValues: values)
-  try await ChatsCommand.spec.run(values, runtime)
+  _ = try await StdoutCapture.capture {
+    try await ChatsCommand.spec.run(values, runtime)
+  }
 }
 
 @Test
@@ -112,7 +114,9 @@ func historyCommandRunsWithChatID() async throws {
     flags: ["jsonOutput"]
   )
   let runtime = RuntimeOptions(parsedValues: values)
-  try await HistoryCommand.spec.run(values, runtime)
+  _ = try await StdoutCapture.capture {
+    try await HistoryCommand.spec.run(values, runtime)
+  }
 }
 
 @Test
@@ -124,7 +128,9 @@ func historyCommandRunsWithAttachmentsNonJson() async throws {
     flags: ["attachments"]
   )
   let runtime = RuntimeOptions(parsedValues: values)
-  try await HistoryCommand.spec.run(values, runtime)
+  _ = try await StdoutCapture.capture {
+    try await HistoryCommand.spec.run(values, runtime)
+  }
 }
 
 @Test
@@ -136,7 +142,9 @@ func chatsCommandRunsWithPlainOutput() async throws {
     flags: []
   )
   let runtime = RuntimeOptions(parsedValues: values)
-  try await ChatsCommand.spec.run(values, runtime)
+  _ = try await StdoutCapture.capture {
+    try await ChatsCommand.spec.run(values, runtime)
+  }
 }
 
 @Test
@@ -204,7 +212,9 @@ func watchCommandRejectsInvalidDebounce() async {
   )
   let runtime = RuntimeOptions(parsedValues: values)
   do {
-    try await WatchCommand.spec.run(values, runtime)
+    _ = try await StdoutCapture.capture {
+      try await WatchCommand.spec.run(values, runtime)
+    }
     #expect(Bool(false))
   } catch let error as ParsedValuesError {
     #expect(error.description.contains("Invalid value"))
@@ -251,12 +261,14 @@ func watchCommandRunsWithStubStream() async throws {
         continuation.finish()
       }
     }
-  try await WatchCommand.run(
-    values: values,
-    runtime: runtime,
-    storeFactory: { _ in store },
-    streamProvider: streamProvider
-  )
+  _ = try await StdoutCapture.capture {
+    try await WatchCommand.run(
+      values: values,
+      runtime: runtime,
+      storeFactory: { _ in store },
+      streamProvider: streamProvider
+    )
+  }
 }
 
 @Test
@@ -320,12 +332,14 @@ func watchCommandRunsWithJsonOutput() async throws {
         continuation.finish()
       }
     }
-  try await WatchCommand.run(
-    values: values,
-    runtime: runtime,
-    storeFactory: { _ in store },
-    streamProvider: streamProvider
-  )
+  _ = try await StdoutCapture.capture {
+    try await WatchCommand.run(
+      values: values,
+      runtime: runtime,
+      storeFactory: { _ in store },
+      streamProvider: streamProvider
+    )
+  }
 }
 
 @Test

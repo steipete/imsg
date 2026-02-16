@@ -15,7 +15,7 @@ enum JSONLines {
   static func print<T: Encodable>(_ value: T) throws {
     let line = try encode(value)
     if !line.isEmpty {
-      Swift.print(line)
+      StdoutWriter.writeLine(line)
     }
   }
 }

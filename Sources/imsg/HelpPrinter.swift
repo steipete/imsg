@@ -4,13 +4,13 @@ import Foundation
 struct HelpPrinter {
   static func printRoot(version: String, rootName: String, commands: [CommandSpec]) {
     for line in renderRoot(version: version, rootName: rootName, commands: commands) {
-      Swift.print(line)
+      StdoutWriter.writeLine(line)
     }
   }
 
   static func printCommand(rootName: String, spec: CommandSpec) {
     for line in renderCommand(rootName: rootName, spec: spec) {
-      Swift.print(line)
+      StdoutWriter.writeLine(line)
     }
   }
 

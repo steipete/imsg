@@ -286,8 +286,6 @@ private func buildMessagePayload(
 }
 
 private final class RPCWriter: RPCOutput, @unchecked Sendable {
-  private let queue = DispatchQueue(label: "imsg.rpc.writer")
-
   func sendResponse(id: Any, result: Any) {
     send(["jsonrpc": "2.0", "id": id, "result": result])
   }
@@ -306,21 +304,15 @@ private final class RPCWriter: RPCOutput, @unchecked Sendable {
   }
 
   private func send(_ object: Any) {
-    queue.sync {
-      do {
-        let data = try JSONSerialization.data(withJSONObject: object, options: [])
-        if let output = String(data: data, encoding: .utf8) {
-          FileHandle.standardOutput.write(Data(output.utf8))
-          FileHandle.standardOutput.write(Data("\n".utf8))
-        }
-      } catch {
-        if let fallback =
-          "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32603,\"message\":\"write failed\"}}\n"
-          .data(using: .utf8)
-        {
-          FileHandle.standardOutput.write(fallback)
-        }
+    do {
+      let data = try JSONSerialization.data(withJSONObject: object, options: [])
+      if let output = String(data: data, encoding: .utf8) {
+        StdoutWriter.writeLine(output)
       }
+    } catch {
+      StdoutWriter.writeLine(
+        "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32603,\"message\":\"write failed\"}}"
+      )
     }
   }
 }

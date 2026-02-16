@@ -91,9 +91,9 @@ enum SendCommand {
       ))
 
     if runtime.jsonOutput {
-      try JSONLines.print(["status": "sent"])
+      try StdoutWriter.writeJSONLine(["status": "sent"])
     } else {
-      Swift.print("sent")
+      StdoutWriter.writeLine("sent")
     }
   }
 }

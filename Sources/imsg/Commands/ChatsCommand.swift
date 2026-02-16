@@ -26,14 +26,14 @@ enum ChatsCommand {
 
     if runtime.jsonOutput {
       for chat in chats {
-        try JSONLines.print(ChatPayload(chat: chat))
+        try StdoutWriter.writeJSONLine(ChatPayload(chat: chat))
       }
       return
     }
 
     for chat in chats {
       let last = CLIISO8601.format(chat.lastMessageAt)
-      Swift.print("[\(chat.id)] \(chat.name) (\(chat.identifier)) last=\(last)")
+      StdoutWriter.writeLine("[\(chat.id)] \(chat.name) (\(chat.identifier)) last=\(last)")
     }
   }
 }

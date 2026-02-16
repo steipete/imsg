@@ -1,5 +1,4 @@
 import Commander
-import Darwin
 import Foundation
 import IMsgCore
 
@@ -90,29 +89,27 @@ enum WatchCommand {
           attachments: attachments,
           reactions: reactions
         )
-        try JSONLines.print(payload)
-        fflush(stdout)
+        try StdoutWriter.writeJSONLine(payload)
         continue
       }
       let direction = message.isFromMe ? "sent" : "recv"
       let timestamp = CLIISO8601.format(message.date)
-      Swift.print("\(timestamp) [\(direction)] \(message.sender): \(message.text)")
+      StdoutWriter.writeLine("\(timestamp) [\(direction)] \(message.sender): \(message.text)")
       if message.attachmentsCount > 0 {
         if showAttachments {
           let metas = try store.attachments(for: message.rowID)
           for meta in metas {
             let name = displayName(for: meta)
-            Swift.print(
+            StdoutWriter.writeLine(
               "  attachment: name=\(name) mime=\(meta.mimeType) missing=\(meta.missing) path=\(meta.originalPath)"
             )
           }
         } else {
-          Swift.print(
+          StdoutWriter.writeLine(
             "  (\(message.attachmentsCount) attachment\(pluralSuffix(for: message.attachmentsCount)))"
           )
         }
       }
-      fflush(stdout)
     }
   }
 }
