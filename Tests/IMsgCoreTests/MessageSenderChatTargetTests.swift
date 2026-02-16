@@ -4,7 +4,8 @@ import Testing
 @testable import IMsgCore
 
 private func normalizeForTest(_ input: String) -> String {
-  let result = input
+  let result =
+    input
     .replacingOccurrences(of: "imessage:", with: "")
     .replacingOccurrences(of: "sms:", with: "")
     .replacingOccurrences(of: "auto:", with: "")
