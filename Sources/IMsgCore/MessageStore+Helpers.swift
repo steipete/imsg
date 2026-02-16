@@ -2,68 +2,50 @@ import Foundation
 import SQLite
 
 extension MessageStore {
-  static func detectAttributedBody(connection: Connection) -> Bool {
+  static func tableColumns(connection: Connection, table: String) -> Set<String> {
     do {
-      let rows = try connection.prepare("PRAGMA table_info(message)")
+      let rows = try connection.prepare("PRAGMA table_info(\(table))")
+      var columns = Set<String>()
       for row in rows {
-        if let name = row[1] as? String,
-          name.caseInsensitiveCompare("attributedBody") == .orderedSame
-        {
-          return true
+        if let name = row[1] as? String {
+          columns.insert(name.lowercased())
         }
       }
+      return columns
     } catch {
-      return false
+      return []
     }
-    return false
+  }
+
+  static func reactionColumnsPresent(in columns: Set<String>) -> Bool {
+    return columns.contains("guid")
+      && columns.contains("associated_message_guid")
+      && columns.contains("associated_message_type")
+  }
+
+  static func detectReactionColumns(connection: Connection) -> Bool {
+    let columns = tableColumns(connection: connection, table: "message")
+    return reactionColumnsPresent(in: columns)
+  }
+
+  static func detectThreadOriginatorGUIDColumn(connection: Connection) -> Bool {
+    return tableColumns(connection: connection, table: "message").contains("thread_originator_guid")
+  }
+
+  static func detectAttributedBody(connection: Connection) -> Bool {
+    return tableColumns(connection: connection, table: "message").contains("attributedbody")
   }
 
   static func detectDestinationCallerID(connection: Connection) -> Bool {
-    do {
-      let rows = try connection.prepare("PRAGMA table_info(message)")
-      for row in rows {
-        if let name = row[1] as? String,
-          name.caseInsensitiveCompare("destination_caller_id") == .orderedSame
-        {
-          return true
-        }
-      }
-    } catch {
-      return false
-    }
-    return false
+    return tableColumns(connection: connection, table: "message").contains("destination_caller_id")
   }
 
   static func detectAudioMessageColumn(connection: Connection) -> Bool {
-    do {
-      let rows = try connection.prepare("PRAGMA table_info(message)")
-      for row in rows {
-        if let name = row[1] as? String,
-          name.caseInsensitiveCompare("is_audio_message") == .orderedSame
-        {
-          return true
-        }
-      }
-    } catch {
-      return false
-    }
-    return false
+    return tableColumns(connection: connection, table: "message").contains("is_audio_message")
   }
 
   static func detectAttachmentUserInfo(connection: Connection) -> Bool {
-    do {
-      let rows = try connection.prepare("PRAGMA table_info(attachment)")
-      for row in rows {
-        if let name = row[1] as? String,
-          name.caseInsensitiveCompare("user_info") == .orderedSame
-        {
-          return true
-        }
-      }
-    } catch {
-      return false
-    }
-    return false
+    return tableColumns(connection: connection, table: "attachment").contains("user_info")
   }
 
   static func enhance(error: Error, path: String) -> Error {

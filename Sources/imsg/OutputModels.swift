@@ -30,6 +30,7 @@ struct MessagePayload: Codable {
   let chatID: Int64
   let guid: String
   let replyToGUID: String?
+  let threadOriginatorGUID: String?
   let sender: String
   let isFromMe: Bool
   let text: String
@@ -42,6 +43,7 @@ struct MessagePayload: Codable {
     self.chatID = message.chatID
     self.guid = message.guid
     self.replyToGUID = message.replyToGUID
+    self.threadOriginatorGUID = message.threadOriginatorGUID
     self.sender = message.sender
     self.isFromMe = message.isFromMe
     self.text = message.text
@@ -55,6 +57,7 @@ struct MessagePayload: Codable {
     case chatID = "chat_id"
     case guid
     case replyToGUID = "reply_to_guid"
+    case threadOriginatorGUID = "thread_originator_guid"
     case sender
     case isFromMe = "is_from_me"
     case text

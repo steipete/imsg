@@ -4,6 +4,32 @@ import Testing
 
 @testable import IMsgCore
 
+private func makeInMemoryMessageDB(includeThreadOriginatorGUID: Bool = false) throws -> Connection {
+  let db = try Connection(.inMemory)
+  let threadOriginatorColumn = includeThreadOriginatorGUID ? "thread_originator_guid TEXT," : ""
+  try db.execute(
+    """
+    CREATE TABLE message (
+      ROWID INTEGER PRIMARY KEY,
+      handle_id INTEGER,
+      text TEXT,
+      guid TEXT,
+      associated_message_guid TEXT,
+      associated_message_type INTEGER,
+      \(threadOriginatorColumn)
+      date INTEGER,
+      is_from_me INTEGER,
+      service TEXT
+    );
+    """
+  )
+  try db.execute("CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT);")
+  try db.execute("CREATE TABLE chat_message_join (chat_id INTEGER, message_id INTEGER);")
+  try db.execute(
+    "CREATE TABLE message_attachment_join (message_id INTEGER, attachment_id INTEGER);")
+  return db
+}
+
 @Test
 func listChatsReturnsChat() throws {
   let store = try TestDatabase.makeStore()
@@ -113,26 +139,7 @@ func messagesAfterReturnsMessages() throws {
 
 @Test
 func messagesAfterExcludesReactionRows() throws {
-  let db = try Connection(.inMemory)
-  try db.execute(
-    """
-    CREATE TABLE message (
-      ROWID INTEGER PRIMARY KEY,
-      handle_id INTEGER,
-      text TEXT,
-      guid TEXT,
-      associated_message_guid TEXT,
-      associated_message_type INTEGER,
-      date INTEGER,
-      is_from_me INTEGER,
-      service TEXT
-    );
-    """
-  )
-  try db.execute("CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT);")
-  try db.execute("CREATE TABLE chat_message_join (chat_id INTEGER, message_id INTEGER);")
-  try db.execute(
-    "CREATE TABLE message_attachment_join (message_id INTEGER, attachment_id INTEGER);")
+  let db = try makeInMemoryMessageDB()
 
   let now = Date()
   try db.run("INSERT INTO handle(ROWID, id) VALUES (1, '+123')")
@@ -172,26 +179,7 @@ func messagesAfterExcludesReactionRows() throws {
 
 @Test
 func messagesExcludeReactionRows() throws {
-  let db = try Connection(.inMemory)
-  try db.execute(
-    """
-    CREATE TABLE message (
-      ROWID INTEGER PRIMARY KEY,
-      handle_id INTEGER,
-      text TEXT,
-      guid TEXT,
-      associated_message_guid TEXT,
-      associated_message_type INTEGER,
-      date INTEGER,
-      is_from_me INTEGER,
-      service TEXT
-    );
-    """
-  )
-  try db.execute("CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT);")
-  try db.execute("CREATE TABLE chat_message_join (chat_id INTEGER, message_id INTEGER);")
-  try db.execute(
-    "CREATE TABLE message_attachment_join (message_id INTEGER, attachment_id INTEGER);")
+  let db = try makeInMemoryMessageDB()
 
   let now = Date()
   try db.run("INSERT INTO handle(ROWID, id) VALUES (1, '+123')")
@@ -220,26 +208,7 @@ func messagesExcludeReactionRows() throws {
 
 @Test
 func messagesExposeReplyToGuid() throws {
-  let db = try Connection(.inMemory)
-  try db.execute(
-    """
-    CREATE TABLE message (
-      ROWID INTEGER PRIMARY KEY,
-      handle_id INTEGER,
-      text TEXT,
-      guid TEXT,
-      associated_message_guid TEXT,
-      associated_message_type INTEGER,
-      date INTEGER,
-      is_from_me INTEGER,
-      service TEXT
-    );
-    """
-  )
-  try db.execute("CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT);")
-  try db.execute("CREATE TABLE chat_message_join (chat_id INTEGER, message_id INTEGER);")
-  try db.execute(
-    "CREATE TABLE message_attachment_join (message_id INTEGER, attachment_id INTEGER);")
+  let db = try makeInMemoryMessageDB()
 
   let now = Date()
   try db.run("INSERT INTO handle(ROWID, id) VALUES (1, '+123')")
@@ -269,26 +238,7 @@ func messagesExposeReplyToGuid() throws {
 
 @Test
 func messagesReplyToGuidHandlesNoPrefix() throws {
-  let db = try Connection(.inMemory)
-  try db.execute(
-    """
-    CREATE TABLE message (
-      ROWID INTEGER PRIMARY KEY,
-      handle_id INTEGER,
-      text TEXT,
-      guid TEXT,
-      associated_message_guid TEXT,
-      associated_message_type INTEGER,
-      date INTEGER,
-      is_from_me INTEGER,
-      service TEXT
-    );
-    """
-  )
-  try db.execute("CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT);")
-  try db.execute("CREATE TABLE chat_message_join (chat_id INTEGER, message_id INTEGER);")
-  try db.execute(
-    "CREATE TABLE message_attachment_join (message_id INTEGER, attachment_id INTEGER);")
+  let db = try makeInMemoryMessageDB()
 
   let now = Date()
   try db.run("INSERT INTO handle(ROWID, id) VALUES (1, '+123')")
@@ -313,6 +263,30 @@ func messagesReplyToGuidHandlesNoPrefix() throws {
   let messages = try store.messages(chatID: 1, limit: 10)
   let reply = messages.first { $0.rowID == 2 }
   #expect(reply?.replyToGUID == "msg-guid-1")
+}
+
+@Test
+func messagesExposeThreadOriginatorGuidWhenAvailable() throws {
+  let db = try makeInMemoryMessageDB(includeThreadOriginatorGUID: true)
+
+  let now = Date()
+  try db.run("INSERT INTO handle(ROWID, id) VALUES (1, '+123')")
+  try db.run(
+    """
+    INSERT INTO message(
+      ROWID, handle_id, text, guid, associated_message_guid, associated_message_type,
+      thread_originator_guid, date, is_from_me, service
+    )
+    VALUES (1, 1, 'hello', 'msg-guid-1', NULL, 0, 'thread-guid-1', ?, 0, 'iMessage')
+    """,
+    TestDatabase.appleEpoch(now)
+  )
+  try db.run("INSERT INTO chat_message_join(chat_id, message_id) VALUES (1, 1)")
+
+  let store = try MessageStore(connection: db, path: ":memory:")
+  let messages = try store.messages(chatID: 1, limit: 10)
+  let message = messages.first { $0.rowID == 1 }
+  #expect(message?.threadOriginatorGUID == "thread-guid-1")
 }
 
 @Test
