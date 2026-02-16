@@ -11,13 +11,13 @@ enum ChatsCommand {
       CommandSignature(
         options: CommandSignatures.baseOptions() + [
           .make(label: "limit", names: [.long("limit")], help: "Number of chats to list")
-        ]
-      )
+        ],
+      ),
     ),
     usageExamples: [
       "imsg chats --limit 5",
       "imsg chats --limit 5 --json",
-    ]
+    ],
   ) { values, runtime in
     let dbPath = values.option("db") ?? MessageStore.defaultPath
     let limit = values.optionInt("limit") ?? 20

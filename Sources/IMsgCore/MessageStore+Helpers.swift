@@ -18,7 +18,7 @@ extension MessageStore {
   }
 
   static func reactionColumnsPresent(in columns: Set<String>) -> Bool {
-    return columns.contains("guid")
+    columns.contains("guid")
       && columns.contains("associated_message_guid")
       && columns.contains("associated_message_type")
   }
@@ -29,23 +29,23 @@ extension MessageStore {
   }
 
   static func detectThreadOriginatorGUIDColumn(connection: Connection) -> Bool {
-    return tableColumns(connection: connection, table: "message").contains("thread_originator_guid")
+    tableColumns(connection: connection, table: "message").contains("thread_originator_guid")
   }
 
   static func detectAttributedBody(connection: Connection) -> Bool {
-    return tableColumns(connection: connection, table: "message").contains("attributedbody")
+    tableColumns(connection: connection, table: "message").contains("attributedbody")
   }
 
   static func detectDestinationCallerID(connection: Connection) -> Bool {
-    return tableColumns(connection: connection, table: "message").contains("destination_caller_id")
+    tableColumns(connection: connection, table: "message").contains("destination_caller_id")
   }
 
   static func detectAudioMessageColumn(connection: Connection) -> Bool {
-    return tableColumns(connection: connection, table: "message").contains("is_audio_message")
+    tableColumns(connection: connection, table: "message").contains("is_audio_message")
   }
 
   static func detectAttachmentUserInfo(connection: Connection) -> Bool {
-    return tableColumns(connection: connection, table: "attachment").contains("user_info")
+    tableColumns(connection: connection, table: "attachment").contains("user_info")
   }
 
   static func enhance(error: Error, path: String) -> Error {
@@ -66,11 +66,12 @@ extension MessageStore {
   func appleDate(from value: Int64?) -> Date {
     guard let value else { return Date(timeIntervalSince1970: MessageStore.appleEpochOffset) }
     return Date(
-      timeIntervalSince1970: (Double(value) / 1_000_000_000) + MessageStore.appleEpochOffset)
+      timeIntervalSince1970: (Double(value) / 1_000_000_000) + MessageStore.appleEpochOffset,
+    )
   }
 
   func stringValue(_ binding: Binding?) -> String {
-    return binding as? String ?? ""
+    binding as? String ?? ""
   }
 
   func int64Value(_ binding: Binding?) -> Int64? {

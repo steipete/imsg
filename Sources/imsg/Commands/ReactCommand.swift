@@ -3,17 +3,31 @@ import Foundation
 import IMsgCore
 
 enum ReactCommand {
+  private enum Automation {
+    static let activateDelaySeconds = 0.3
+    static let openSearchDelaySeconds = 0.15
+    static let searchResultDelaySeconds = 0.25
+    static let openTapbackDelaySeconds = 0.35
+    static let reactionMenuDelaySeconds = 0.2
+    static let customConfirmDelaySeconds = 0.1
+    static let returnKeyCode = 36
+
+    static let searchKey = "f"
+    static let selectAllKey = "a"
+    static let openTapbackKey = "t"
+  }
+
   static let spec = CommandSpec(
     name: "react",
     abstract: "Send a tapback reaction to the most recent message",
     discussion: """
       Sends a tapback reaction to the most recent incoming message in the specified chat.
-      
+
       IMPORTANT LIMITATIONS:
       - Only reacts to the MOST RECENT incoming message in the conversation
       - Requires Messages.app to be running
       - Uses UI automation (System Events) which requires accessibility permissions
-      
+
       Reaction types:
         love (❤️), like (👍), dislike (👎), laugh (😂), emphasis (‼️), question (❓)
         Or any single emoji for custom reactions (iOS 17+ / macOS 14+)
@@ -22,17 +36,19 @@ enum ReactCommand {
       CommandSignature(
         options: CommandSignatures.baseOptions() + [
           .make(label: "chatID", names: [.long("chat-id")], help: "chat rowid to react in"),
-          .make(label: "reaction", names: [.long("reaction"), .short("r")], 
-                help: "reaction type: love, like, dislike, laugh, emphasis, question, or emoji"),
+          .make(
+            label: "reaction", names: [.long("reaction"), .short("r")],
+            help: "reaction type: love, like, dislike, laugh, emphasis, question, or emoji",
+          ),
         ],
-        flags: []
-      )
+        flags: [],
+      ),
     ),
     usageExamples: [
       "imsg react --chat-id 1 --reaction like",
       "imsg react --chat-id 1 -r love",
       "imsg react --chat-id 1 -r 🎉",
-    ]
+    ],
   ) { values, runtime in
     try await run(values: values, runtime: runtime)
   }
@@ -43,7 +59,7 @@ enum ReactCommand {
     storeFactory: @escaping (String) throws -> MessageStore = { try MessageStore(path: $0) },
     appleScriptRunner: @escaping (String, [String]) throws -> Void = { source, arguments in
       try runAppleScript(source, arguments: arguments)
-    }
+    },
   ) async throws {
     guard let chatID = values.optionInt64("chatID") else {
       throw ParsedValuesError.missingOption("chat-id")
@@ -54,7 +70,7 @@ enum ReactCommand {
     guard let reactionType = ReactionType.parse(reactionString) else {
       throw IMsgError.invalidReaction(reactionString)
     }
-    if case let .custom(emoji) = reactionType, !isSingleEmoji(emoji) {
+    if case .custom(let emoji) = reactionType, !isSingleEmoji(emoji) {
       throw IMsgError.invalidReaction(reactionString)
     }
 
@@ -72,7 +88,7 @@ enum ReactCommand {
       reactionType: reactionType,
       chatGUID: chatInfo.guid,
       chatLookup: chatLookup,
-      appleScriptRunner: appleScriptRunner
+      appleScriptRunner: appleScriptRunner,
     )
 
     if runtime.jsonOutput {
@@ -80,7 +96,7 @@ enum ReactCommand {
         success: true,
         chatID: chatID,
         reactionType: reactionType.name,
-        reactionEmoji: reactionType.emoji
+        reactionEmoji: reactionType.emoji,
       )
       try JSONLines.print(result)
     } else {
@@ -92,82 +108,73 @@ enum ReactCommand {
     reactionType: ReactionType,
     chatGUID: String,
     chatLookup: String,
-    appleScriptRunner: @escaping (String, [String]) throws -> Void
+    appleScriptRunner: @escaping (String, [String]) throws -> Void,
   ) throws {
-    let keyNumber: Int
+    let reactionSelection: String
+    let shouldConfirmCustomSelection: String
     switch reactionType {
-    case .love: keyNumber = 1
-    case .like: keyNumber = 2
-    case .dislike: keyNumber = 3
-    case .laugh: keyNumber = 4
-    case .emphasis: keyNumber = 5
-    case .question: keyNumber = 6
+    case .love, .like, .dislike, .laugh, .emphasis, .question:
+      reactionSelection = "\(tapbackKeyNumber(for: reactionType))"
+      shouldConfirmCustomSelection = "0"
     case .custom:
-      let script = """
-        on run argv
-          set chatGUID to item 1 of argv
-          set chatLookup to item 2 of argv
-          set customEmoji to item 3 of argv
-
-          tell application "Messages"
-            activate
-            set targetChat to chat id chatGUID
-          end tell
-
-          delay 0.3
-
-          tell application "System Events"
-            tell process "Messages"
-              keystroke "f" using command down
-              delay 0.15
-              keystroke "a" using command down
-              keystroke chatLookup
-              delay 0.25
-              key code 36
-              delay 0.35
-              keystroke "t" using command down
-              delay 0.2
-              keystroke customEmoji
-              delay 0.1
-              key code 36
-            end tell
-          end tell
-        end run
-        """
-      try appleScriptRunner(script, [chatGUID, chatLookup, reactionType.emoji])
-      return
+      reactionSelection = reactionType.emoji
+      shouldConfirmCustomSelection = "1"
     }
 
-    let script = """
-      on run argv
-        set chatGUID to item 1 of argv
-        set chatLookup to item 2 of argv
-        set reactionKey to item 3 of argv
+    try appleScriptRunner(
+      reactionScript(),
+      [chatGUID, chatLookup, reactionSelection, shouldConfirmCustomSelection],
+    )
+  }
 
-        tell application "Messages"
-          activate
-          set targetChat to chat id chatGUID
+  private static func reactionScript() -> String {
+    """
+    on run argv
+      set chatGUID to item 1 of argv
+      set chatLookup to item 2 of argv
+      set reactionSelection to item 3 of argv
+      set shouldConfirmSelection to item 4 of argv
+
+      tell application "Messages"
+        activate
+        set targetChat to chat id chatGUID
+      end tell
+
+      delay \(Automation.activateDelaySeconds)
+
+      tell application "System Events"
+        tell process "Messages"
+          keystroke "\(Automation.searchKey)" using command down
+          delay \(Automation.openSearchDelaySeconds)
+          keystroke "\(Automation.selectAllKey)" using command down
+          keystroke chatLookup
+          delay \(Automation.searchResultDelaySeconds)
+          key code \(Automation.returnKeyCode)
+          delay \(Automation.openTapbackDelaySeconds)
+          keystroke "\(Automation.openTapbackKey)" using command down
+          delay \(Automation.reactionMenuDelaySeconds)
+          keystroke reactionSelection
+          if shouldConfirmSelection is "1" then
+            delay \(Automation.customConfirmDelaySeconds)
+            key code \(Automation.returnKeyCode)
+          end if
         end tell
+      end tell
+    end run
+    """
+  }
 
-        delay 0.3
-
-        tell application "System Events"
-          tell process "Messages"
-            keystroke "f" using command down
-            delay 0.15
-            keystroke "a" using command down
-            keystroke chatLookup
-            delay 0.25
-            key code 36
-            delay 0.35
-            keystroke "t" using command down
-            delay 0.2
-            keystroke reactionKey
-          end tell
-        end tell
-      end run
-      """
-    try appleScriptRunner(script, [chatGUID, chatLookup, "\(keyNumber)"])
+  private static func tapbackKeyNumber(for reactionType: ReactionType) -> Int {
+    switch reactionType {
+    case .love: 1
+    case .like: 2
+    case .dislike: 3
+    case .laugh: 4
+    case .emphasis: 5
+    case .question: 6
+    case .custom:
+      preconditionFailure("custom reactions do not map to numbered tapback keys")
+    }
   }
 
   private static func preferredChatLookup(chatInfo: ChatInfo) -> String {
@@ -219,7 +226,7 @@ struct ReactResult: Codable {
   let chatID: Int64
   let reactionType: String
   let reactionEmoji: String
-  
+
   enum CodingKeys: String, CodingKey {
     case success
     case chatID = "chat_id"

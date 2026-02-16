@@ -18,7 +18,7 @@ func audioMessagesUseTranscriptionText() throws {
       service TEXT,
       is_audio_message INTEGER
     );
-    """
+    """,
   )
   try db.execute("CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT);")
   try db.execute("CREATE TABLE chat_message_join (chat_id INTEGER, message_id INTEGER);")
@@ -34,10 +34,10 @@ func audioMessagesUseTranscriptionText() throws {
       is_sticker INTEGER,
       user_info BLOB
     );
-    """
+    """,
   )
   try db.execute(
-    "CREATE TABLE message_attachment_join (message_id INTEGER, attachment_id INTEGER);"
+    "CREATE TABLE message_attachment_join (message_id INTEGER, attachment_id INTEGER);",
   )
 
   let now = Date()
@@ -47,14 +47,14 @@ func audioMessagesUseTranscriptionText() throws {
     INSERT INTO message(ROWID, handle_id, text, date, is_from_me, service, is_audio_message)
     VALUES (1, 1, 'placeholder', ?, 0, 'iMessage', 1)
     """,
-    TestDatabase.appleEpoch(now)
+    TestDatabase.appleEpoch(now),
   )
   try db.run("INSERT INTO chat_message_join(chat_id, message_id) VALUES (1, 1)")
 
   let info = try PropertyListSerialization.data(
     fromPropertyList: ["audio-transcription": "test transcript"],
     format: .binary,
-    options: 0
+    options: 0,
   )
   let infoBlob = Blob(bytes: [UInt8](info))
   try db.run(
@@ -71,7 +71,7 @@ func audioMessagesUseTranscriptionText() throws {
     )
     VALUES (1, '', '', '', '', 0, 0, ?)
     """,
-    infoBlob
+    infoBlob,
   )
   try db.run("INSERT INTO message_attachment_join(message_id, attachment_id) VALUES (1, 1)")
 
@@ -95,7 +95,7 @@ func messagesAfterUsesAudioTranscriptionText() throws {
       service TEXT,
       is_audio_message INTEGER
     );
-    """
+    """,
   )
   try db.execute("CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT);")
   try db.execute("CREATE TABLE chat_message_join (chat_id INTEGER, message_id INTEGER);")
@@ -111,10 +111,10 @@ func messagesAfterUsesAudioTranscriptionText() throws {
       is_sticker INTEGER,
       user_info BLOB
     );
-    """
+    """,
   )
   try db.execute(
-    "CREATE TABLE message_attachment_join (message_id INTEGER, attachment_id INTEGER);"
+    "CREATE TABLE message_attachment_join (message_id INTEGER, attachment_id INTEGER);",
   )
 
   let now = Date()
@@ -124,14 +124,14 @@ func messagesAfterUsesAudioTranscriptionText() throws {
     INSERT INTO message(ROWID, handle_id, text, date, is_from_me, service, is_audio_message)
     VALUES (1, 1, 'placeholder', ?, 0, 'iMessage', 1)
     """,
-    TestDatabase.appleEpoch(now)
+    TestDatabase.appleEpoch(now),
   )
   try db.run("INSERT INTO chat_message_join(chat_id, message_id) VALUES (1, 1)")
 
   let info = try PropertyListSerialization.data(
     fromPropertyList: ["audio-transcription": "test transcript"],
     format: .binary,
-    options: 0
+    options: 0,
   )
   let infoBlob = Blob(bytes: [UInt8](info))
   try db.run(
@@ -148,7 +148,7 @@ func messagesAfterUsesAudioTranscriptionText() throws {
     )
     VALUES (1, '', '', '', '', 0, 0, ?)
     """,
-    infoBlob
+    infoBlob,
   )
   try db.run("INSERT INTO message_attachment_join(message_id, attachment_id) VALUES (1, 1)")
 

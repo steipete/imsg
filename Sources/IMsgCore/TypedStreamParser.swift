@@ -4,7 +4,7 @@ enum TypedStreamParser {
   static func parseAttributedBody(_ data: Data) -> String {
     guard !data.isEmpty else { return "" }
     let bytes = [UInt8](data)
-    let start = [UInt8(0x01), UInt8(0x2b)]
+    let start = [UInt8(0x01), UInt8(0x2B)]
     let end = [UInt8(0x86), UInt8(0x84)]
     var best = ""
 

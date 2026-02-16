@@ -18,7 +18,7 @@ func messagesByChatUsesAttributedBodyFallback() throws {
       is_from_me INTEGER,
       service TEXT
     );
-    """
+    """,
   )
   try db.execute(
     """
@@ -29,7 +29,7 @@ func messagesByChatUsesAttributedBodyFallback() throws {
       display_name TEXT,
       service_name TEXT
     );
-    """
+    """,
   )
   try db.execute("CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT);")
   try db.execute("CREATE TABLE chat_message_join (chat_id INTEGER, message_id INTEGER);")
@@ -39,17 +39,17 @@ func messagesByChatUsesAttributedBodyFallback() throws {
       message_id INTEGER,
       attachment_id INTEGER
     );
-    """
+    """,
   )
 
   let now = Date()
-  let bodyBytes = [UInt8(0x01), UInt8(0x2b)] + Array("fallback text".utf8) + [0x86, 0x84]
+  let bodyBytes = [UInt8(0x01), UInt8(0x2B)] + Array("fallback text".utf8) + [0x86, 0x84]
   let body = Blob(bytes: bodyBytes)
   try db.run(
     """
     INSERT INTO chat(ROWID, chat_identifier, guid, display_name, service_name)
     VALUES (1, '+123', 'iMessage;+;chat123', 'Test Chat', 'iMessage')
-    """
+    """,
   )
   try db.run("INSERT INTO handle(ROWID, id) VALUES (1, '+123')")
   try db.run(
@@ -58,7 +58,7 @@ func messagesByChatUsesAttributedBodyFallback() throws {
     VALUES (1, 1, NULL, ?, ?, 0, 'iMessage')
     """,
     body,
-    TestDatabase.appleEpoch(now)
+    TestDatabase.appleEpoch(now),
   )
   try db.run("INSERT INTO chat_message_join(chat_id, message_id) VALUES (1, 1)")
 
@@ -82,7 +82,7 @@ func messagesByChatUsesLengthPrefixedAttributedBodyFallback() throws {
       is_from_me INTEGER,
       service TEXT
     );
-    """
+    """,
   )
   try db.execute(
     """
@@ -93,7 +93,7 @@ func messagesByChatUsesLengthPrefixedAttributedBodyFallback() throws {
       display_name TEXT,
       service_name TEXT
     );
-    """
+    """,
   )
   try db.execute("CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT);")
   try db.execute("CREATE TABLE chat_message_join (chat_id INTEGER, message_id INTEGER);")
@@ -103,18 +103,18 @@ func messagesByChatUsesLengthPrefixedAttributedBodyFallback() throws {
       message_id INTEGER,
       attachment_id INTEGER
     );
-    """
+    """,
   )
 
   let now = Date()
   let text = "length prefixed"
-  let bodyBytes: [UInt8] = [0x01, 0x2b, UInt8(text.utf8.count)] + Array(text.utf8) + [0x86, 0x84]
+  let bodyBytes: [UInt8] = [0x01, 0x2B, UInt8(text.utf8.count)] + Array(text.utf8) + [0x86, 0x84]
   let body = Blob(bytes: bodyBytes)
   try db.run(
     """
     INSERT INTO chat(ROWID, chat_identifier, guid, display_name, service_name)
     VALUES (1, '+123', 'iMessage;+;chat123', 'Test Chat', 'iMessage')
-    """
+    """,
   )
   try db.run("INSERT INTO handle(ROWID, id) VALUES (1, '+123')")
   try db.run(
@@ -123,7 +123,7 @@ func messagesByChatUsesLengthPrefixedAttributedBodyFallback() throws {
     VALUES (1, 1, NULL, ?, ?, 0, 'iMessage')
     """,
     body,
-    TestDatabase.appleEpoch(now)
+    TestDatabase.appleEpoch(now),
   )
   try db.run("INSERT INTO chat_message_join(chat_id, message_id) VALUES (1, 1)")
 
@@ -147,7 +147,7 @@ func messagesAfterUsesAttributedBodyFallback() throws {
       is_from_me INTEGER,
       service TEXT
     );
-    """
+    """,
   )
   try db.execute("CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT);")
   try db.execute("CREATE TABLE chat_message_join (chat_id INTEGER, message_id INTEGER);")
@@ -157,11 +157,11 @@ func messagesAfterUsesAttributedBodyFallback() throws {
       message_id INTEGER,
       attachment_id INTEGER
     );
-    """
+    """,
   )
 
   let now = Date()
-  let bodyBytes = [UInt8(0x01), UInt8(0x2b)] + Array("new text".utf8) + [0x86, 0x84]
+  let bodyBytes = [UInt8(0x01), UInt8(0x2B)] + Array("new text".utf8) + [0x86, 0x84]
   let body = Blob(bytes: bodyBytes)
   try db.run("INSERT INTO handle(ROWID, id) VALUES (1, '+123')")
   try db.run(
@@ -170,7 +170,7 @@ func messagesAfterUsesAttributedBodyFallback() throws {
     VALUES (1, 1, NULL, ?, ?, 0, 'iMessage')
     """,
     body,
-    TestDatabase.appleEpoch(now)
+    TestDatabase.appleEpoch(now),
   )
   try db.run("INSERT INTO chat_message_join(chat_id, message_id) VALUES (1, 1)")
 

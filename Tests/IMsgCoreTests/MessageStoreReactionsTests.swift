@@ -25,7 +25,7 @@ private enum ReactionTestDatabase {
         is_from_me INTEGER,
         service TEXT
       );
-      """
+      """,
     )
     try db.execute(
       """
@@ -35,7 +35,7 @@ private enum ReactionTestDatabase {
         display_name TEXT,
         service_name TEXT
       );
-      """
+      """,
     )
     try db.execute("CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT);")
     try db.execute("CREATE TABLE chat_message_join (chat_id INTEGER, message_id INTEGER);")
@@ -45,7 +45,7 @@ private enum ReactionTestDatabase {
         message_id INTEGER,
         attachment_id INTEGER
       );
-      """
+      """,
     )
     return db
   }
@@ -55,13 +55,13 @@ private enum ReactionTestDatabase {
     now: Date,
     messageID: Int64 = 1,
     guid: String = "msg-guid-1",
-    text: String = "Hello world"
+    text: String = "Hello world",
   ) throws {
     try db.run(
       """
       INSERT INTO chat(ROWID, chat_identifier, display_name, service_name)
       VALUES (1, '+123', 'Test Chat', 'iMessage')
-      """
+      """,
     )
     try db.run("INSERT INTO handle(ROWID, id) VALUES (1, '+123'), (2, '+456')")
     try db.run(
@@ -72,7 +72,7 @@ private enum ReactionTestDatabase {
       messageID,
       text,
       guid,
-      appleEpoch(now.addingTimeInterval(-600))
+      appleEpoch(now.addingTimeInterval(-600)),
     )
     try db.run("INSERT INTO chat_message_join(chat_id, message_id) VALUES (1, ?)", messageID)
   }
@@ -90,7 +90,7 @@ func reactionsForMessageReturnsReactions() throws {
     INSERT INTO message(ROWID, handle_id, text, guid, associated_message_guid, associated_message_type, date, is_from_me, service)
     VALUES (2, 2, '', 'reaction-guid-1', 'p:0/msg-guid-1', 2000, ?, 0, 'iMessage')
     """,
-    ReactionTestDatabase.appleEpoch(now.addingTimeInterval(-500))
+    ReactionTestDatabase.appleEpoch(now.addingTimeInterval(-500)),
   )
   // Like reaction from me
   try db.run(
@@ -98,7 +98,7 @@ func reactionsForMessageReturnsReactions() throws {
     INSERT INTO message(ROWID, handle_id, text, guid, associated_message_guid, associated_message_type, date, is_from_me, service)
     VALUES (3, 1, '', 'reaction-guid-2', 'p:0/msg-guid-1', 2001, ?, 1, 'iMessage')
     """,
-    ReactionTestDatabase.appleEpoch(now.addingTimeInterval(-400))
+    ReactionTestDatabase.appleEpoch(now.addingTimeInterval(-400)),
   )
   // Laugh reaction from +456
   try db.run(
@@ -106,7 +106,7 @@ func reactionsForMessageReturnsReactions() throws {
     INSERT INTO message(ROWID, handle_id, text, guid, associated_message_guid, associated_message_type, date, is_from_me, service)
     VALUES (4, 2, '', 'reaction-guid-3', 'p:0/msg-guid-1', 2003, ?, 0, 'iMessage')
     """,
-    ReactionTestDatabase.appleEpoch(now.addingTimeInterval(-300))
+    ReactionTestDatabase.appleEpoch(now.addingTimeInterval(-300)),
   )
   // Custom emoji reaction (type 2006) from +456
   try db.run(
@@ -114,7 +114,7 @@ func reactionsForMessageReturnsReactions() throws {
     INSERT INTO message(ROWID, handle_id, text, guid, associated_message_guid, associated_message_type, date, is_from_me, service)
     VALUES (5, 2, 'Reacted 🎉 to "Hello world"', 'reaction-guid-4', 'p:0/msg-guid-1', 2006, ?, 0, 'iMessage')
     """,
-    ReactionTestDatabase.appleEpoch(now.addingTimeInterval(-200))
+    ReactionTestDatabase.appleEpoch(now.addingTimeInterval(-200)),
   )
 
   let store = try MessageStore(connection: db, path: ":memory:")
@@ -160,14 +160,14 @@ func reactionsForMessageRemovesReactions() throws {
     INSERT INTO message(ROWID, handle_id, text, guid, associated_message_guid, associated_message_type, date, is_from_me, service)
     VALUES (2, 2, '', 'reaction-guid-1', 'p:0/msg-guid-1', 2001, ?, 0, 'iMessage')
     """,
-    ReactionTestDatabase.appleEpoch(now.addingTimeInterval(-500))
+    ReactionTestDatabase.appleEpoch(now.addingTimeInterval(-500)),
   )
   try db.run(
     """
     INSERT INTO message(ROWID, handle_id, text, guid, associated_message_guid, associated_message_type, date, is_from_me, service)
     VALUES (3, 2, 'Removed a like', 'reaction-guid-2', 'p:0/msg-guid-1', 3001, ?, 0, 'iMessage')
     """,
-    ReactionTestDatabase.appleEpoch(now.addingTimeInterval(-400))
+    ReactionTestDatabase.appleEpoch(now.addingTimeInterval(-400)),
   )
 
   let store = try MessageStore(connection: db, path: ":memory:")
@@ -187,7 +187,7 @@ func reactionsForMessageParsesCustomEmojiWithoutEnglishPrefix() throws {
     INSERT INTO message(ROWID, handle_id, text, guid, associated_message_guid, associated_message_type, date, is_from_me, service)
     VALUES (2, 2, '🎉 reagiu a "Hello world"', 'reaction-guid-1', 'p:0/msg-guid-1', 2006, ?, 0, 'iMessage')
     """,
-    ReactionTestDatabase.appleEpoch(now.addingTimeInterval(-500))
+    ReactionTestDatabase.appleEpoch(now.addingTimeInterval(-500)),
   )
 
   let store = try MessageStore(connection: db, path: ":memory:")
@@ -208,7 +208,7 @@ func reactionsMatchGuidWithoutPrefix() throws {
     INSERT INTO message(ROWID, handle_id, text, guid, associated_message_guid, associated_message_type, date, is_from_me, service)
     VALUES (2, 2, '', 'reaction-guid-1', 'msg-guid-1', 2000, ?, 0, 'iMessage')
     """,
-    ReactionTestDatabase.appleEpoch(now.addingTimeInterval(-500))
+    ReactionTestDatabase.appleEpoch(now.addingTimeInterval(-500)),
   )
 
   let store = try MessageStore(connection: db, path: ":memory:")
@@ -229,14 +229,14 @@ func reactionsForMessageRemovesCustomEmojiWithoutEmojiText() throws {
     INSERT INTO message(ROWID, handle_id, text, guid, associated_message_guid, associated_message_type, date, is_from_me, service)
     VALUES (2, 2, 'Reacted 🎉 to \"Hello world\"', 'reaction-guid-1', 'p:0/msg-guid-1', 2006, ?, 0, 'iMessage')
     """,
-    ReactionTestDatabase.appleEpoch(now.addingTimeInterval(-500))
+    ReactionTestDatabase.appleEpoch(now.addingTimeInterval(-500)),
   )
   try db.run(
     """
     INSERT INTO message(ROWID, handle_id, text, guid, associated_message_guid, associated_message_type, date, is_from_me, service)
     VALUES (3, 2, 'Removed a reaction', 'reaction-guid-2', 'p:0/msg-guid-1', 3006, ?, 0, 'iMessage')
     """,
-    ReactionTestDatabase.appleEpoch(now.addingTimeInterval(-400))
+    ReactionTestDatabase.appleEpoch(now.addingTimeInterval(-400)),
   )
 
   let store = try MessageStore(connection: db, path: ":memory:")
@@ -258,7 +258,7 @@ func reactionsForMessageReturnsEmptyWhenColumnsMissing() throws {
       is_from_me INTEGER,
       service TEXT
     );
-    """
+    """,
   )
   let store = try MessageStore(connection: db, path: ":memory:")
   let reactions = try store.reactions(for: 1)
@@ -267,7 +267,7 @@ func reactionsForMessageReturnsEmptyWhenColumnsMissing() throws {
 }
 
 @Test
-func reactionTypeProperties() throws {
+func reactionTypeProperties() {
   #expect(ReactionType.love.name == "love")
   #expect(ReactionType.love.emoji == "❤️")
   #expect(ReactionType.like.name == "like")
@@ -285,7 +285,7 @@ func reactionTypeProperties() throws {
 }
 
 @Test
-func reactionTypeFromRawValue() throws {
+func reactionTypeFromRawValue() {
   #expect(ReactionType(rawValue: 2000) == .love)
   #expect(ReactionType(rawValue: 2001) == .like)
   #expect(ReactionType(rawValue: 2002) == .dislike)
@@ -298,7 +298,7 @@ func reactionTypeFromRawValue() throws {
 }
 
 @Test
-func reactionTypeHelpers() throws {
+func reactionTypeHelpers() {
   #expect(ReactionType.isReactionAdd(2000) == true)
   #expect(ReactionType.isReactionAdd(2005) == true)
   #expect(ReactionType.isReactionAdd(2006) == true)

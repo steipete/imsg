@@ -11,17 +11,17 @@ enum TestDatabase {
 
   static func makeStore(
     includeAttributedBody: Bool = false,
-    includeReactionColumns: Bool = false
+    includeReactionColumns: Bool = false,
   ) throws -> MessageStore {
     let db = try Connection(.inMemory)
     let attributedBodyColumn = includeAttributedBody ? "attributedBody BLOB," : ""
 
-    let reactionColumns: String
-    if includeReactionColumns {
-      reactionColumns = "guid TEXT, associated_message_guid TEXT, associated_message_type INTEGER,"
-    } else {
-      reactionColumns = ""
-    }
+    let reactionColumns =
+      if includeReactionColumns {
+        "guid TEXT, associated_message_guid TEXT, associated_message_type INTEGER,"
+      } else {
+        ""
+      }
 
     try db.execute(
       """
@@ -35,7 +35,7 @@ enum TestDatabase {
         is_from_me INTEGER,
         service TEXT
       );
-      """
+      """,
     )
     try db.execute(
       """
@@ -46,7 +46,7 @@ enum TestDatabase {
         display_name TEXT,
         service_name TEXT
       );
-      """
+      """,
     )
     try db.execute("CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT);")
     try db.execute("CREATE TABLE chat_handle_join (chat_id INTEGER, handle_id INTEGER);")
@@ -62,7 +62,7 @@ enum TestDatabase {
         total_bytes INTEGER,
         is_sticker INTEGER
       );
-      """
+      """,
     )
     try db.execute(
       """
@@ -70,7 +70,7 @@ enum TestDatabase {
         message_id INTEGER,
         attachment_id INTEGER
       );
-      """
+      """,
     )
 
     let now = Date()
@@ -78,7 +78,7 @@ enum TestDatabase {
       """
       INSERT INTO chat(ROWID, chat_identifier, guid, display_name, service_name)
       VALUES (1, '+123', 'iMessage;+;chat123', 'Test Chat', 'iMessage')
-      """
+      """,
     )
     try db.run("INSERT INTO handle(ROWID, id) VALUES (1, '+123'), (2, 'Me')")
     try db.run("INSERT INTO chat_handle_join(chat_id, handle_id) VALUES (1, 1), (1, 2)")
@@ -99,7 +99,7 @@ enum TestDatabase {
         row.2,
         appleEpoch(row.4),
         row.3 ? 1 : 0,
-        "iMessage"
+        "iMessage",
       )
       try db.run("INSERT INTO chat_message_join(chat_id, message_id) VALUES (1, ?)", row.0)
       if row.5 > 0 {
@@ -115,14 +115,14 @@ enum TestDatabase {
             is_sticker
           )
           VALUES (1, '~/Library/Messages/Attachments/test.dat', 'test.dat', 'public.data', 'application/octet-stream', 123, 0)
-          """
+          """,
         )
         try db.run(
           """
           INSERT INTO message_attachment_join(message_id, attachment_id)
           VALUES (?, 1)
           """,
-          row.0
+          row.0,
         )
       }
     }

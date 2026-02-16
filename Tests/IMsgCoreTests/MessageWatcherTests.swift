@@ -22,12 +22,13 @@ private enum WatcherTestDatabase {
         is_from_me INTEGER,
         service TEXT
       );
-      """
+      """,
     )
     try db.execute("CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT);")
     try db.execute("CREATE TABLE chat_message_join (chat_id INTEGER, message_id INTEGER);")
     try db.execute(
-      "CREATE TABLE message_attachment_join (message_id INTEGER, attachment_id INTEGER);")
+      "CREATE TABLE message_attachment_join (message_id INTEGER, attachment_id INTEGER);",
+    )
 
     let now = Date()
     try db.run("INSERT INTO handle(ROWID, id) VALUES (1, '+123')")
@@ -36,12 +37,13 @@ private enum WatcherTestDatabase {
       INSERT INTO message(ROWID, handle_id, text, date, is_from_me, service)
       VALUES (1, 1, 'hello', ?, 0, 'iMessage')
       """,
-      appleEpoch(now)
+      appleEpoch(now),
     )
     try db.run("INSERT INTO chat_message_join(chat_id, message_id) VALUES (1, 1)")
 
     return try MessageStore(
-      connection: db, path: ":memory:", hasAttributedBody: false, hasReactionColumns: false)
+      connection: db, path: ":memory:", hasAttributedBody: false, hasReactionColumns: false,
+    )
   }
 }
 
@@ -52,7 +54,7 @@ func messageWatcherYieldsExistingMessages() async throws {
   let stream = watcher.stream(
     chatID: nil,
     sinceRowID: -1,
-    configuration: MessageWatcherConfiguration(debounceInterval: 0.01, batchLimit: 10)
+    configuration: MessageWatcherConfiguration(debounceInterval: 0.01, batchLimit: 10),
   )
 
   let task = Task { () throws -> Message? in

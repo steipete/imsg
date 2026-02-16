@@ -9,11 +9,11 @@ struct ChatPayload: Codable {
   let lastMessageAt: String
 
   init(chat: Chat) {
-    self.id = chat.id
-    self.name = chat.name
-    self.identifier = chat.identifier
-    self.service = chat.service
-    self.lastMessageAt = CLIISO8601.format(chat.lastMessageAt)
+    id = chat.id
+    name = chat.name
+    identifier = chat.identifier
+    service = chat.service
+    lastMessageAt = CLIISO8601.format(chat.lastMessageAt)
   }
 
   enum CodingKeys: String, CodingKey {
@@ -37,7 +37,7 @@ struct MessagePayload: Codable {
   let createdAt: String
   let attachments: [AttachmentPayload]
   let reactions: [ReactionPayload]
-  
+
   // Reaction event metadata (populated when this message is a reaction event)
   let isReaction: Bool?
   let reactionType: String?
@@ -46,32 +46,24 @@ struct MessagePayload: Codable {
   let reactedToGUID: String?
 
   init(message: Message, attachments: [AttachmentMeta], reactions: [Reaction] = []) {
-    self.id = message.rowID
-    self.chatID = message.chatID
-    self.guid = message.guid
-    self.replyToGUID = message.replyToGUID
-    self.threadOriginatorGUID = message.threadOriginatorGUID
-    self.sender = message.sender
-    self.isFromMe = message.isFromMe
-    self.text = message.text
-    self.createdAt = CLIISO8601.format(message.date)
+    id = message.rowID
+    chatID = message.chatID
+    guid = message.guid
+    replyToGUID = message.replyToGUID
+    threadOriginatorGUID = message.threadOriginatorGUID
+    sender = message.sender
+    isFromMe = message.isFromMe
+    text = message.text
+    createdAt = CLIISO8601.format(message.date)
     self.attachments = attachments.map { AttachmentPayload(meta: $0) }
     self.reactions = reactions.map { ReactionPayload(reaction: $0) }
-    
-    // Reaction event metadata
-    if message.isReaction {
-      self.isReaction = true
-      self.reactionType = message.reactionType?.name
-      self.reactionEmoji = message.reactionType?.emoji
-      self.isReactionAdd = message.isReactionAdd
-      self.reactedToGUID = message.reactedToGUID
-    } else {
-      self.isReaction = nil
-      self.reactionType = nil
-      self.reactionEmoji = nil
-      self.isReactionAdd = nil
-      self.reactedToGUID = nil
-    }
+
+    let reactionMetadata = ReactionEventMetadata(message: message)
+    isReaction = reactionMetadata.isReaction
+    reactionType = reactionMetadata.reactionType
+    reactionEmoji = reactionMetadata.reactionEmoji
+    isReactionAdd = reactionMetadata.isReactionAdd
+    reactedToGUID = reactionMetadata.reactedToGUID
   }
 
   enum CodingKeys: String, CodingKey {
@@ -103,12 +95,12 @@ struct ReactionPayload: Codable {
   let createdAt: String
 
   init(reaction: Reaction) {
-    self.id = reaction.rowID
-    self.type = reaction.reactionType.name
-    self.emoji = reaction.reactionType.emoji
-    self.sender = reaction.sender
-    self.isFromMe = reaction.isFromMe
-    self.createdAt = CLIISO8601.format(reaction.date)
+    id = reaction.rowID
+    type = reaction.reactionType.name
+    emoji = reaction.reactionType.emoji
+    sender = reaction.sender
+    isFromMe = reaction.isFromMe
+    createdAt = CLIISO8601.format(reaction.date)
   }
 
   enum CodingKeys: String, CodingKey {
@@ -132,25 +124,25 @@ struct AttachmentPayload: Codable {
   let missing: Bool
 
   init(meta: AttachmentMeta) {
-    self.filename = meta.filename
-    self.transferName = meta.transferName
-    self.uti = meta.uti
-    self.mimeType = meta.mimeType
-    self.totalBytes = meta.totalBytes
-    self.isSticker = meta.isSticker
-    self.originalPath = meta.originalPath
-    self.missing = meta.missing
+    filename = meta.filename
+    transferName = meta.transferName
+    uti = meta.uti
+    mimeType = meta.mimeType
+    totalBytes = meta.totalBytes
+    isSticker = meta.isSticker
+    originalPath = meta.originalPath
+    missing = meta.missing
   }
 
   enum CodingKeys: String, CodingKey {
-    case filename = "filename"
+    case filename
     case transferName = "transfer_name"
-    case uti = "uti"
+    case uti
     case mimeType = "mime_type"
     case totalBytes = "total_bytes"
     case isSticker = "is_sticker"
     case originalPath = "original_path"
-    case missing = "missing"
+    case missing
   }
 }
 

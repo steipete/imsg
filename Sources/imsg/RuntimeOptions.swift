@@ -6,8 +6,8 @@ struct RuntimeOptions: Sendable {
   let logLevel: String?
 
   init(parsedValues: ParsedValues) {
-    self.jsonOutput = parsedValues.flags.contains("jsonOutput")
-    self.verbose = parsedValues.flags.contains("verbose")
-    self.logLevel = parsedValues.options["logLevel"]?.last
+    jsonOutput = parsedValues.flags.contains("jsonOutput")
+    verbose = parsedValues.flags.contains("verbose")
+    logLevel = parsedValues.options["logLevel"]?.last
   }
 }

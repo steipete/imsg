@@ -21,11 +21,11 @@ final class RPCServer {
     store: MessageStore,
     verbose: Bool,
     output: RPCOutput = RPCWriter(),
-    sendMessage: @escaping (MessageSendOptions) throws -> Void = { try MessageSender().send($0) }
+    sendMessage: @escaping (MessageSendOptions) throws -> Void = { try MessageSender().send($0) },
   ) {
     self.store = store
-    self.watcher = MessageWatcher(store: store)
-    self.cache = ChatCache(store: store)
+    watcher = MessageWatcher(store: store)
+    cache = ChatCache(store: store)
     self.verbose = verbose
     self.output = output
     self.sendMessage = sendMessage
@@ -63,7 +63,7 @@ final class RPCServer {
       return
     }
     let jsonrpc = request["jsonrpc"] as? String
-    if jsonrpc != nil && jsonrpc != "2.0" {
+    if jsonrpc != nil, jsonrpc != "2.0" {
       output.sendError(id: request["id"], error: RPCError.invalidRequest("jsonrpc must be 2.0"))
       return
     }
@@ -93,7 +93,7 @@ final class RPCServer {
             name: name,
             service: service,
             lastMessageAt: chat.lastMessageAt,
-            participants: participants
+            participants: participants,
           )
         }
         respond(id: id, result: ["chats": payloads])
@@ -109,7 +109,7 @@ final class RPCServer {
         let filter = try MessageFilter.fromISO(
           participants: participants,
           startISO: startISO,
-          endISO: endISO
+          endISO: endISO,
         )
         let filtered = try store.messages(chatID: chatID, limit: max(limit, 1), filter: filter)
         let payloads = try filtered.map { message in
@@ -117,7 +117,7 @@ final class RPCServer {
             store: store,
             cache: cache,
             message: message,
-            includeAttachments: includeAttachments
+            includeAttachments: includeAttachments,
           )
         }
         respond(id: id, result: ["messages": payloads])
@@ -132,7 +132,7 @@ final class RPCServer {
         let filter = try MessageFilter.fromISO(
           participants: participants,
           startISO: startISO,
-          endISO: endISO
+          endISO: endISO,
         )
         let config = MessageWatcherConfiguration(includeReactions: includeReactions)
         let subID = nextSubscriptionID
@@ -151,7 +151,7 @@ final class RPCServer {
             for try await message in localWatcher.stream(
               chatID: localChatID,
               sinceRowID: localSinceRowID,
-              configuration: localConfig
+              configuration: localConfig,
             ) {
               if Task.isCancelled { return }
               if !localFilter.allows(message) { continue }
@@ -159,11 +159,11 @@ final class RPCServer {
                 store: localStore,
                 cache: localCache,
                 message: message,
-                includeAttachments: localIncludeAttachments
+                includeAttachments: localIncludeAttachments,
               )
               localWriter.sendNotification(
                 method: "message",
-                params: ["subscription": subID, "message": payload]
+                params: ["subscription": subID, "message": payload],
               )
             }
           } catch {
@@ -172,7 +172,7 @@ final class RPCServer {
               params: [
                 "subscription": subID,
                 "error": ["message": String(describing: error)],
-              ]
+              ],
             )
           }
         }
@@ -198,7 +198,7 @@ final class RPCServer {
       case .invalidService, .invalidChatTarget:
         output.sendError(
           id: id,
-          error: RPCError.invalidParams(err.errorDescription ?? "invalid params")
+          error: RPCError.invalidParams(err.errorDescription ?? "invalid params"),
         )
       default:
         output.sendError(id: id, error: RPCError.internalError(err.localizedDescription))
@@ -227,14 +227,14 @@ final class RPCServer {
     let chatGUID = stringParam(params["chat_guid"]) ?? ""
     let hasChatTarget = chatID != nil || !chatIdentifier.isEmpty || !chatGUID.isEmpty
     let recipient = stringParam(params["to"]) ?? ""
-    if hasChatTarget && !recipient.isEmpty {
+    if hasChatTarget, !recipient.isEmpty {
       throw RPCError.invalidParams("use to or chat_*; not both")
     }
-    if !hasChatTarget && recipient.isEmpty {
+    if !hasChatTarget, recipient.isEmpty {
       throw RPCError.invalidParams("to is required for direct sends")
     }
 
-    if text.isEmpty && file.isEmpty {
+    if text.isEmpty, file.isEmpty {
       throw RPCError.invalidParams("text or file is required")
     }
 
@@ -247,7 +247,7 @@ final class RPCServer {
       resolvedChatIdentifier = info.identifier
       resolvedChatGUID = info.guid
     }
-    if hasChatTarget && resolvedChatIdentifier.isEmpty && resolvedChatGUID.isEmpty {
+    if hasChatTarget, resolvedChatIdentifier.isEmpty, resolvedChatGUID.isEmpty {
       throw RPCError.invalidParams("missing chat identifier or guid")
     }
 
@@ -259,19 +259,18 @@ final class RPCServer {
         service: service,
         region: region,
         chatIdentifier: resolvedChatIdentifier,
-        chatGUID: resolvedChatGUID
-      )
+        chatGUID: resolvedChatGUID,
+      ),
     )
     respond(id: id, result: ["ok": true])
   }
-
 }
 
 private func buildMessagePayload(
   store: MessageStore,
   cache: ChatCache,
   message: Message,
-  includeAttachments: Bool
+  includeAttachments: Bool,
 ) throws -> [String: Any] {
   let chatInfo = try cache.info(chatID: message.chatID)
   let participants = try cache.participants(chatID: message.chatID)
@@ -282,7 +281,7 @@ private func buildMessagePayload(
     chatInfo: chatInfo,
     participants: participants,
     attachments: attachments,
-    reactions: reactions
+    reactions: reactions,
   )
 }
 
@@ -312,7 +311,7 @@ private final class RPCWriter: RPCOutput, @unchecked Sendable {
       }
     } catch {
       StdoutWriter.writeLine(
-        "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32603,\"message\":\"write failed\"}}"
+        "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32603,\"message\":\"write failed\"}}",
       )
     }
   }

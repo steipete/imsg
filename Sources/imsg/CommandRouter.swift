@@ -8,8 +8,8 @@ struct CommandRouter {
   let program: Program
 
   init() {
-    self.version = CommandRouter.resolveVersion()
-    self.specs = [
+    version = CommandRouter.resolveVersion()
+    specs = [
       ChatsCommand.spec,
       HistoryCommand.spec,
       WatchCommand.spec,
@@ -22,13 +22,13 @@ struct CommandRouter {
       abstract: "Send and read iMessage / SMS from the terminal",
       discussion: nil,
       signature: CommandSignature(),
-      subcommands: specs.map { $0.descriptor }
+      subcommands: specs.map(\.descriptor),
     )
-    self.program = Program(descriptors: [descriptor])
+    program = Program(descriptors: [descriptor])
   }
 
   func run() async -> Int32 {
-    return await run(argv: CommandLine.arguments)
+    await run(argv: CommandLine.arguments)
   }
 
   func run(argv: [String]) async -> Int32 {

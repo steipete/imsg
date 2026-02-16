@@ -13,31 +13,35 @@ enum WatchCommand {
           .make(label: "chatID", names: [.long("chat-id")], help: "limit to chat rowid"),
           .make(
             label: "debounce", names: [.long("debounce")],
-            help: "debounce interval for filesystem events (e.g. 250ms)"),
+            help: "debounce interval for filesystem events (e.g. 250ms)",
+          ),
           .make(
             label: "sinceRowID", names: [.long("since-rowid")],
-            help: "start watching after this rowid"),
+            help: "start watching after this rowid",
+          ),
           .make(
             label: "participants", names: [.long("participants")],
-            help: "filter by participant handles", parsing: .upToNextOption),
+            help: "filter by participant handles", parsing: .upToNextOption,
+          ),
           .make(label: "start", names: [.long("start")], help: "ISO8601 start (inclusive)"),
           .make(label: "end", names: [.long("end")], help: "ISO8601 end (exclusive)"),
         ],
         flags: [
           .make(
-            label: "attachments", names: [.long("attachments")], help: "include attachment metadata"
+            label: "attachments", names: [.long("attachments")],
+            help: "include attachment metadata",
           ),
           .make(
-            label: "reactions", names: [.long("reactions")], 
-            help: "include reaction events (tapback add/remove) in the stream"
-          )
-        ]
-      )
+            label: "reactions", names: [.long("reactions")],
+            help: "include reaction events (tapback add/remove) in the stream",
+          ),
+        ],
+      ),
     ),
     usageExamples: [
       "imsg watch --chat-id 1 --attachments --debounce 250ms",
       "imsg watch --chat-id 1 --participants +15551234567",
-    ]
+    ],
   ) { values, runtime in
     try await run(values: values, runtime: runtime)
   }
@@ -51,10 +55,10 @@ enum WatchCommand {
         MessageWatcher,
         Int64?,
         Int64?,
-        MessageWatcherConfiguration
+        MessageWatcherConfiguration,
       ) -> AsyncThrowingStream<Message, Error> = { watcher, chatID, sinceRowID, config in
         watcher.stream(chatID: chatID, sinceRowID: sinceRowID, configuration: config)
-      }
+      },
   ) async throws {
     let dbPath = values.option("db") ?? MessageStore.defaultPath
     let chatID = values.optionInt64("chatID")
@@ -71,7 +75,7 @@ enum WatchCommand {
     let filter = try MessageFilter.fromISO(
       participants: participants,
       startISO: values.option("start"),
-      endISO: values.option("end")
+      endISO: values.option("end"),
     )
 
     let store = try storeFactory(dbPath)
@@ -79,7 +83,7 @@ enum WatchCommand {
     let config = MessageWatcherConfiguration(
       debounceInterval: debounceInterval,
       batchLimit: 100,
-      includeReactions: includeReactions
+      includeReactions: includeReactions,
     )
 
     let stream = streamProvider(watcher, chatID, sinceRowID, config)
@@ -93,7 +97,7 @@ enum WatchCommand {
         let payload = MessagePayload(
           message: message,
           attachments: attachments,
-          reactions: reactions
+          reactions: reactions,
         )
         try StdoutWriter.writeJSONLine(payload)
         continue
@@ -104,7 +108,7 @@ enum WatchCommand {
         let action = (message.isReactionAdd ?? true) ? "added" : "removed"
         let targetGUID = message.reactedToGUID ?? "unknown"
         StdoutWriter.writeLine(
-          "\(timestamp) [\(direction)] \(message.sender) \(action) \(reactionType.emoji) reaction to \(targetGUID)"
+          "\(timestamp) [\(direction)] \(message.sender) \(action) \(reactionType.emoji) reaction to \(targetGUID)",
         )
         continue
       }
@@ -115,12 +119,12 @@ enum WatchCommand {
           for meta in metas {
             let name = displayName(for: meta)
             StdoutWriter.writeLine(
-              "  attachment: name=\(name) mime=\(meta.mimeType) missing=\(meta.missing) path=\(meta.originalPath)"
+              "  attachment: name=\(name) mime=\(meta.mimeType) missing=\(meta.missing) path=\(meta.originalPath)",
             )
           }
         } else {
           StdoutWriter.writeLine(
-            "  (\(message.attachmentsCount) attachment\(pluralSuffix(for: message.attachmentsCount)))"
+            "  (\(message.attachmentsCount) attachment\(pluralSuffix(for: message.attachmentsCount)))",
           )
         }
       }

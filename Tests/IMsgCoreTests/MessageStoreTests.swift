@@ -21,12 +21,13 @@ private func makeInMemoryMessageDB(includeThreadOriginatorGUID: Bool = false) th
       is_from_me INTEGER,
       service TEXT
     );
-    """
+    """,
   )
   try db.execute("CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT);")
   try db.execute("CREATE TABLE chat_message_join (chat_id INTEGER, message_id INTEGER);")
   try db.execute(
-    "CREATE TABLE message_attachment_join (message_id INTEGER, attachment_id INTEGER);")
+    "CREATE TABLE message_attachment_join (message_id INTEGER, attachment_id INTEGER);",
+  )
   return db
 }
 
@@ -60,7 +61,7 @@ func participantsReturnsUniqueHandles() throws {
       display_name TEXT,
       service_name TEXT
     );
-    """
+    """,
   )
   try db.execute("CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT);")
   try db.execute("CREATE TABLE chat_handle_join (chat_id INTEGER, handle_id INTEGER);")
@@ -68,7 +69,7 @@ func participantsReturnsUniqueHandles() throws {
     """
     INSERT INTO chat(ROWID, chat_identifier, guid, display_name, service_name)
     VALUES (1, 'iMessage;+;chat123', 'iMessage;+;chat123', 'Group', 'iMessage')
-    """
+    """,
   )
   try db.run("INSERT INTO handle(ROWID, id) VALUES (1, '+123'), (2, 'me@icloud.com')")
   try db.run("INSERT INTO chat_handle_join(chat_id, handle_id) VALUES (1, 1), (1, 2), (1, 1)")
@@ -100,7 +101,7 @@ func messagesByChatAppliesDateFilterBeforeLimit() throws {
   guard let target else { return }
   let filter = MessageFilter(
     startDate: target.date.addingTimeInterval(-1),
-    endDate: target.date.addingTimeInterval(1)
+    endDate: target.date.addingTimeInterval(1),
   )
   let filtered = try store.messages(chatID: 1, limit: 1, filter: filter)
   #expect(filtered.count == 1)
@@ -118,7 +119,7 @@ func messagesByChatAppliesParticipantFilterBeforeLimit() throws {
       INSERT INTO message(ROWID, handle_id, text, date, is_from_me, service)
       VALUES (4, 2, 'newest from me', ?, 1, 'iMessage')
       """,
-      TestDatabase.appleEpoch(Date().addingTimeInterval(5))
+      TestDatabase.appleEpoch(Date().addingTimeInterval(5)),
     )
     try db.run("INSERT INTO chat_message_join(chat_id, message_id) VALUES (1, 4)")
   }
@@ -148,21 +149,21 @@ func messagesAfterExcludesReactionRows() throws {
     INSERT INTO message(ROWID, handle_id, text, guid, associated_message_guid, associated_message_type, date, is_from_me, service)
     VALUES (1, 1, 'hello', 'msg-guid-1', NULL, 0, ?, 0, 'iMessage')
     """,
-    TestDatabase.appleEpoch(now)
+    TestDatabase.appleEpoch(now),
   )
   try db.run(
     """
     INSERT INTO message(ROWID, handle_id, text, guid, associated_message_guid, associated_message_type, date, is_from_me, service)
     VALUES (2, 1, '', 'reaction-guid-1', 'p:0/msg-guid-1', 2002, ?, 0, 'iMessage')
     """,
-    TestDatabase.appleEpoch(now.addingTimeInterval(1))
+    TestDatabase.appleEpoch(now.addingTimeInterval(1)),
   )
   try db.run(
     """
     INSERT INTO message(ROWID, handle_id, text, guid, associated_message_guid, associated_message_type, date, is_from_me, service)
     VALUES (3, 1, 'reply', 'msg-guid-3', 'p:0/msg-guid-1', 1000, ?, 0, 'iMessage')
     """,
-    TestDatabase.appleEpoch(now.addingTimeInterval(2))
+    TestDatabase.appleEpoch(now.addingTimeInterval(2)),
   )
   try db.run("INSERT INTO chat_message_join(chat_id, message_id) VALUES (1, 1)")
   try db.run("INSERT INTO chat_message_join(chat_id, message_id) VALUES (1, 2)")
@@ -170,7 +171,7 @@ func messagesAfterExcludesReactionRows() throws {
 
   let store = try MessageStore(connection: db, path: ":memory:")
   let messages = try store.messagesAfter(afterRowID: 0, chatID: 1, limit: 10)
-  let rowIDs = messages.map { $0.rowID }
+  let rowIDs = messages.map(\.rowID)
   #expect(messages.count == 2)
   #expect(rowIDs.contains(1))
   #expect(rowIDs.contains(3))
@@ -188,14 +189,14 @@ func messagesExcludeReactionRows() throws {
     INSERT INTO message(ROWID, handle_id, text, guid, associated_message_guid, associated_message_type, date, is_from_me, service)
     VALUES (1, 1, 'hello', 'msg-guid-1', NULL, 0, ?, 0, 'iMessage')
     """,
-    TestDatabase.appleEpoch(now)
+    TestDatabase.appleEpoch(now),
   )
   try db.run(
     """
     INSERT INTO message(ROWID, handle_id, text, guid, associated_message_guid, associated_message_type, date, is_from_me, service)
     VALUES (2, 1, '', 'reaction-guid-1', 'p:0/msg-guid-1', 2001, ?, 0, 'iMessage')
     """,
-    TestDatabase.appleEpoch(now.addingTimeInterval(1))
+    TestDatabase.appleEpoch(now.addingTimeInterval(1)),
   )
   try db.run("INSERT INTO chat_message_join(chat_id, message_id) VALUES (1, 1)")
   try db.run("INSERT INTO chat_message_join(chat_id, message_id) VALUES (1, 2)")
@@ -217,14 +218,14 @@ func messagesExposeReplyToGuid() throws {
     INSERT INTO message(ROWID, handle_id, text, guid, associated_message_guid, associated_message_type, date, is_from_me, service)
     VALUES (1, 1, 'base', 'msg-guid-1', NULL, 0, ?, 0, 'iMessage')
     """,
-    TestDatabase.appleEpoch(now)
+    TestDatabase.appleEpoch(now),
   )
   try db.run(
     """
     INSERT INTO message(ROWID, handle_id, text, guid, associated_message_guid, associated_message_type, date, is_from_me, service)
     VALUES (2, 1, 'reply', 'msg-guid-2', 'p:0/msg-guid-1', 1000, ?, 0, 'iMessage')
     """,
-    TestDatabase.appleEpoch(now.addingTimeInterval(1))
+    TestDatabase.appleEpoch(now.addingTimeInterval(1)),
   )
   try db.run("INSERT INTO chat_message_join(chat_id, message_id) VALUES (1, 1)")
   try db.run("INSERT INTO chat_message_join(chat_id, message_id) VALUES (1, 2)")
@@ -247,14 +248,14 @@ func messagesReplyToGuidHandlesNoPrefix() throws {
     INSERT INTO message(ROWID, handle_id, text, guid, associated_message_guid, associated_message_type, date, is_from_me, service)
     VALUES (1, 1, 'base', 'msg-guid-1', NULL, 0, ?, 0, 'iMessage')
     """,
-    TestDatabase.appleEpoch(now)
+    TestDatabase.appleEpoch(now),
   )
   try db.run(
     """
     INSERT INTO message(ROWID, handle_id, text, guid, associated_message_guid, associated_message_type, date, is_from_me, service)
     VALUES (2, 1, 'reply', 'msg-guid-2', 'msg-guid-1', 1000, ?, 0, 'iMessage')
     """,
-    TestDatabase.appleEpoch(now.addingTimeInterval(1))
+    TestDatabase.appleEpoch(now.addingTimeInterval(1)),
   )
   try db.run("INSERT INTO chat_message_join(chat_id, message_id) VALUES (1, 1)")
   try db.run("INSERT INTO chat_message_join(chat_id, message_id) VALUES (1, 2)")
@@ -279,7 +280,7 @@ func messagesExposeThreadOriginatorGuidWhenAvailable() throws {
     )
     VALUES (1, 1, 'hello', 'msg-guid-1', NULL, 0, 'thread-guid-1', ?, 0, 'iMessage')
     """,
-    TestDatabase.appleEpoch(now)
+    TestDatabase.appleEpoch(now),
   )
   try db.run("INSERT INTO chat_message_join(chat_id, message_id) VALUES (1, 1)")
 
@@ -313,7 +314,7 @@ func longRepeatedPatternMessage() throws {
       is_from_me INTEGER,
       service TEXT
     );
-    """
+    """,
   )
   try db.execute(
     """
@@ -324,7 +325,7 @@ func longRepeatedPatternMessage() throws {
       display_name TEXT,
       service_name TEXT
     );
-    """
+    """,
   )
   try db.execute("CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT);")
   try db.execute("CREATE TABLE chat_message_join (chat_id INTEGER, message_id INTEGER);")
@@ -334,7 +335,7 @@ func longRepeatedPatternMessage() throws {
       message_id INTEGER,
       attachment_id INTEGER
     );
-    """
+    """,
   )
 
   let now = Date()
@@ -343,13 +344,13 @@ func longRepeatedPatternMessage() throws {
   let pattern = "aaaaaaaaaaaa "
   // Creates a message > 1300 bytes
   let longText = String(repeating: pattern, count: 100)
-  let bodyBytes = [UInt8(0x01), UInt8(0x2b)] + Array(longText.utf8) + [0x86, 0x84]
+  let bodyBytes = [UInt8(0x01), UInt8(0x2B)] + Array(longText.utf8) + [0x86, 0x84]
   let body = Blob(bytes: bodyBytes)
   try db.run(
     """
     INSERT INTO chat(ROWID, chat_identifier, guid, display_name, service_name)
     VALUES (1, '+123', 'iMessage;+;chat123', 'Test Chat', 'iMessage')
-    """
+    """,
   )
   try db.run("INSERT INTO handle(ROWID, id) VALUES (1, '+123')")
   try db.run(
@@ -358,7 +359,7 @@ func longRepeatedPatternMessage() throws {
     VALUES (1, 1, NULL, ?, ?, 0, 'iMessage')
     """,
     body,
-    TestDatabase.appleEpoch(now)
+    TestDatabase.appleEpoch(now),
   )
   try db.run("INSERT INTO chat_message_join(chat_id, message_id) VALUES (1, 1)")
 

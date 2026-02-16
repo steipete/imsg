@@ -23,7 +23,7 @@ private enum RPCTestDatabase {
         is_from_me INTEGER,
         service TEXT
       );
-      """
+      """,
     )
     try db.execute(
       """
@@ -34,7 +34,7 @@ private enum RPCTestDatabase {
         display_name TEXT,
         service_name TEXT
       );
-      """
+      """,
     )
     try db.execute("CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT);")
     try db.execute("CREATE TABLE chat_handle_join (chat_id INTEGER, handle_id INTEGER);")
@@ -50,17 +50,18 @@ private enum RPCTestDatabase {
         total_bytes INTEGER,
         is_sticker INTEGER
       );
-      """
+      """,
     )
     try db.execute(
-      "CREATE TABLE message_attachment_join (message_id INTEGER, attachment_id INTEGER);")
+      "CREATE TABLE message_attachment_join (message_id INTEGER, attachment_id INTEGER);",
+    )
 
     let now = Date()
     try db.run(
       """
       INSERT INTO chat(ROWID, chat_identifier, guid, display_name, service_name)
       VALUES (1, 'iMessage;+;chat123', 'iMessage;+;chat123', 'Group Chat', 'iMessage')
-      """
+      """,
     )
     try db.run("INSERT INTO handle(ROWID, id) VALUES (1, '+123'), (2, 'me@icloud.com')")
     try db.run("INSERT INTO chat_handle_join(chat_id, handle_id) VALUES (1, 1), (1, 2)")
@@ -69,12 +70,13 @@ private enum RPCTestDatabase {
       INSERT INTO message(ROWID, handle_id, text, date, is_from_me, service)
       VALUES (5, 1, 'hello', ?, 0, 'iMessage')
       """,
-      appleEpoch(now)
+      appleEpoch(now),
     )
     try db.run("INSERT INTO chat_message_join(chat_id, message_id) VALUES (1, 5)")
 
     return try MessageStore(
-      connection: db, path: ":memory:", hasAttributedBody: false, hasReactionColumns: false)
+      connection: db, path: ":memory:", hasAttributedBody: false, hasReactionColumns: false,
+    )
   }
 }
 
@@ -163,7 +165,7 @@ func rpcSendResolvesChatID() async throws {
     store: store,
     verbose: false,
     output: output,
-    sendMessage: { options in captured = options }
+    sendMessage: { options in captured = options },
   )
 
   let line = #"{"jsonrpc":"2.0","id":"3","method":"send","params":{"chat_id":1,"text":"yo"}}"#

@@ -23,7 +23,7 @@ public struct MessageSendOptions: Sendable {
     service: MessageService = .auto,
     region: String = "US",
     chatIdentifier: String = "",
-    chatGUID: String = ""
+    chatGUID: String = "",
   ) {
     self.recipient = recipient
     self.text = text
@@ -41,22 +41,22 @@ public struct MessageSender {
   private let attachmentsSubdirectoryProvider: () -> URL
 
   public init() {
-    self.normalizer = PhoneNumberNormalizer()
-    self.runner = MessageSender.runAppleScript
-    self.attachmentsSubdirectoryProvider = MessageSender.defaultAttachmentsSubdirectory
+    normalizer = PhoneNumberNormalizer()
+    runner = MessageSender.runAppleScript
+    attachmentsSubdirectoryProvider = MessageSender.defaultAttachmentsSubdirectory
   }
 
   init(runner: @escaping (String, [String]) throws -> Void) {
-    self.normalizer = PhoneNumberNormalizer()
+    normalizer = PhoneNumberNormalizer()
     self.runner = runner
-    self.attachmentsSubdirectoryProvider = MessageSender.defaultAttachmentsSubdirectory
+    attachmentsSubdirectoryProvider = MessageSender.defaultAttachmentsSubdirectory
   }
 
   init(
     runner: @escaping (String, [String]) throws -> Void,
-    attachmentsSubdirectoryProvider: @escaping () -> URL
+    attachmentsSubdirectoryProvider: @escaping () -> URL,
   ) {
-    self.normalizer = PhoneNumberNormalizer()
+    normalizer = PhoneNumberNormalizer()
     self.runner = runner
     self.attachmentsSubdirectoryProvider = attachmentsSubdirectoryProvider
   }
@@ -90,12 +90,12 @@ public struct MessageSender {
     try fileManager.createDirectory(at: subdirectory, withIntermediateDirectories: true)
     let attachmentDir = subdirectory.appendingPathComponent(
       UUID().uuidString,
-      isDirectory: true
+      isDirectory: true,
     )
     try fileManager.createDirectory(at: attachmentDir, withIntermediateDirectories: true)
     let destination = attachmentDir.appendingPathComponent(
       sourceURL.lastPathComponent,
-      isDirectory: false
+      isDirectory: false,
     )
     try fileManager.copyItem(at: sourceURL, to: destination)
     return destination.path
@@ -106,7 +106,7 @@ public struct MessageSender {
     let home = fileManager.homeDirectoryForCurrentUser
     let messagesRoot = home.appendingPathComponent(
       "Library/Messages/Attachments",
-      isDirectory: true
+      isDirectory: true,
     )
     return messagesRoot.appendingPathComponent("imsg", isDirectory: true)
   }
@@ -114,7 +114,7 @@ public struct MessageSender {
   private func sendViaAppleScript(
     _ resolved: MessageSendOptions,
     chatTarget: String,
-    useChat: Bool
+    useChat: Bool,
   ) throws {
     let script = appleScript()
     let arguments = [
@@ -130,51 +130,51 @@ public struct MessageSender {
   }
 
   private func appleScript() -> String {
-    return """
-      on run argv
-          set theRecipient to item 1 of argv
-          set theMessage to item 2 of argv
-          set theService to item 3 of argv
-          set theFilePath to item 4 of argv
-          set useAttachment to item 5 of argv
-          set chatId to item 6 of argv
-          set useChat to item 7 of argv
+    """
+    on run argv
+        set theRecipient to item 1 of argv
+        set theMessage to item 2 of argv
+        set theService to item 3 of argv
+        set theFilePath to item 4 of argv
+        set useAttachment to item 5 of argv
+        set chatId to item 6 of argv
+        set useChat to item 7 of argv
 
-          tell application "Messages"
-              if useChat is "1" then
-                  set targetChat to chat id chatId
-                  if theMessage is not "" then
-                      send theMessage to targetChat
-                  end if
-                  if useAttachment is "1" then
-                      set theFile to POSIX file theFilePath as alias
-                      send theFile to targetChat
-                  end if
-              else
-                  if theService is "sms" then
-                      set targetService to first service whose service type is SMS
-                  else
-                      set targetService to first service whose service type is iMessage
-                  end if
+        tell application "Messages"
+            if useChat is "1" then
+                set targetChat to chat id chatId
+                if theMessage is not "" then
+                    send theMessage to targetChat
+                end if
+                if useAttachment is "1" then
+                    set theFile to POSIX file theFilePath as alias
+                    send theFile to targetChat
+                end if
+            else
+                if theService is "sms" then
+                    set targetService to first service whose service type is SMS
+                else
+                    set targetService to first service whose service type is iMessage
+                end if
 
-                  set targetBuddy to buddy theRecipient of targetService
-                  if theMessage is not "" then
-                      send theMessage to targetBuddy
-                  end if
-                  if useAttachment is "1" then
-                      set theFile to POSIX file theFilePath as alias
-                      send theFile to targetBuddy
-                  end if
-              end if
-          end tell
-      end run
-      """
+                set targetBuddy to buddy theRecipient of targetService
+                if theMessage is not "" then
+                    send theMessage to targetBuddy
+                end if
+                if useAttachment is "1" then
+                    set theFile to POSIX file theFilePath as alias
+                    send theFile to targetBuddy
+                end if
+            end if
+        end tell
+    end run
+    """
   }
 
   private func resolveChatTarget(_ options: inout MessageSendOptions) -> String {
     let guid = options.chatGUID.trimmingCharacters(in: .whitespacesAndNewlines)
     let identifier = options.chatIdentifier.trimmingCharacters(in: .whitespacesAndNewlines)
-    if !identifier.isEmpty && looksLikeHandle(identifier) {
+    if !identifier.isEmpty, looksLikeHandle(identifier) {
       if options.recipient.isEmpty {
         options.recipient = identifier
       }
@@ -211,10 +211,11 @@ public struct MessageSender {
       eventID: AEEventID(kASSubroutineEvent),
       targetDescriptor: nil,
       returnID: AEReturnID(kAutoGenerateReturnID),
-      transactionID: AETransactionID(kAnyTransactionID)
+      transactionID: AETransactionID(kAnyTransactionID),
     )
     event.setParam(
-      NSAppleEventDescriptor(string: "run"), forKeyword: AEKeyword(keyASSubroutineName))
+      NSAppleEventDescriptor(string: "run"), forKeyword: AEKeyword(keyASSubroutineName),
+    )
     let list = NSAppleEventDescriptor.list()
     for (index, value) in arguments.enumerated() {
       list.insert(NSAppleEventDescriptor(string: value), at: index + 1)

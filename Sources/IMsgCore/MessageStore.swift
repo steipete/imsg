@@ -24,24 +24,24 @@ public final class MessageStore: @unchecked Sendable {
   public init(path: String = MessageStore.defaultPath) throws {
     let normalized = NSString(string: path).expandingTildeInPath
     self.path = normalized
-    self.queue = DispatchQueue(label: "imsg.db", qos: .userInitiated)
-    self.queue.setSpecific(key: queueKey, value: ())
+    queue = DispatchQueue(label: "imsg.db", qos: .userInitiated)
+    queue.setSpecific(key: queueKey, value: ())
     do {
       let uri = URL(fileURLWithPath: normalized).absoluteString
       let location = Connection.Location.uri(uri, parameters: [.mode(.readOnly)])
-      self.connection = try Connection(location, readonly: true)
-      self.connection.busyTimeout = 5
-      let messageColumns = MessageStore.tableColumns(connection: self.connection, table: "message")
+      connection = try Connection(location, readonly: true)
+      connection.busyTimeout = 5
+      let messageColumns = MessageStore.tableColumns(connection: connection, table: "message")
       let attachmentColumns = MessageStore.tableColumns(
-        connection: self.connection,
-        table: "attachment"
+        connection: connection,
+        table: "attachment",
       )
-      self.hasAttributedBody = messageColumns.contains("attributedbody")
-      self.hasReactionColumns = MessageStore.reactionColumnsPresent(in: messageColumns)
-      self.hasThreadOriginatorGUIDColumn = messageColumns.contains("thread_originator_guid")
-      self.hasDestinationCallerID = messageColumns.contains("destination_caller_id")
-      self.hasAudioMessageColumn = messageColumns.contains("is_audio_message")
-      self.hasAttachmentUserInfo = attachmentColumns.contains("user_info")
+      hasAttributedBody = messageColumns.contains("attributedbody")
+      hasReactionColumns = MessageStore.reactionColumnsPresent(in: messageColumns)
+      hasThreadOriginatorGUIDColumn = messageColumns.contains("thread_originator_guid")
+      hasDestinationCallerID = messageColumns.contains("destination_caller_id")
+      hasAudioMessageColumn = messageColumns.contains("is_audio_message")
+      hasAttachmentUserInfo = attachmentColumns.contains("user_info")
     } catch {
       throw MessageStore.enhance(error: error, path: normalized)
     }
@@ -55,11 +55,11 @@ public final class MessageStore: @unchecked Sendable {
     hasThreadOriginatorGUIDColumn: Bool? = nil,
     hasDestinationCallerID: Bool? = nil,
     hasAudioMessageColumn: Bool? = nil,
-    hasAttachmentUserInfo: Bool? = nil
+    hasAttachmentUserInfo: Bool? = nil,
   ) throws {
     self.path = path
-    self.queue = DispatchQueue(label: "imsg.db.test", qos: .userInitiated)
-    self.queue.setSpecific(key: queueKey, value: ())
+    queue = DispatchQueue(label: "imsg.db.test", qos: .userInitiated)
+    queue.setSpecific(key: queueKey, value: ())
     self.connection = connection
     self.connection.busyTimeout = 5
     let messageColumns = MessageStore.tableColumns(connection: connection, table: "message")
@@ -117,7 +117,9 @@ public final class MessageStore: @unchecked Sendable {
         let lastDate = appleDate(from: int64Value(row[4]))
         chats.append(
           Chat(
-            id: id, identifier: identifier, name: name, service: service, lastMessageAt: lastDate))
+            id: id, identifier: identifier, name: name, service: service, lastMessageAt: lastDate,
+          ),
+        )
       }
       return chats
     }
@@ -143,7 +145,7 @@ public final class MessageStore: @unchecked Sendable {
           identifier: identifier,
           guid: guid,
           name: name,
-          service: service
+          service: service,
         )
       }
       return nil
@@ -209,8 +211,9 @@ extension MessageStore {
             totalBytes: totalBytes,
             isSticker: isSticker,
             originalPath: resolved.resolved,
-            missing: resolved.missing
-          ))
+            missing: resolved.missing,
+          ),
+        )
       }
       return metas
     }
@@ -242,7 +245,7 @@ extension MessageStore {
       let plist = try PropertyListSerialization.propertyList(
         from: data,
         options: [],
-        format: nil
+        format: nil,
       )
       guard
         let dict = plist as? [String: Any],
@@ -258,7 +261,7 @@ extension MessageStore {
   }
 
   public func maxRowID() throws -> Int64 {
-    return try withConnection { db in
+    try withConnection { db in
       let value = try db.scalar("SELECT MAX(ROWID) FROM message")
       return int64Value(value) ?? 0
     }
@@ -333,7 +336,7 @@ extension MessageStore {
             sender: sender,
             isFromMe: isFromMe,
             date: date,
-            associatedMessageID: messageID
+            associatedMessageID: messageID,
           )
         } else {
           reactionIndex[key] = reactions.count
@@ -344,8 +347,9 @@ extension MessageStore {
               sender: sender,
               isFromMe: isFromMe,
               date: date,
-              associatedMessageID: messageID
-            ))
+              associatedMessageID: messageID,
+            ),
+          )
         }
       }
       return reactions
@@ -387,7 +391,7 @@ extension MessageStore {
         let key = ReactionKey(
           sender: reaction.sender,
           isFromMe: reaction.isFromMe,
-          reactionType: reaction.reactionType
+          reactionType: reaction.reactionType,
         )
         index[key] = offset
       }

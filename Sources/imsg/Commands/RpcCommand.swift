@@ -8,12 +8,12 @@ enum RpcCommand {
     abstract: "Run JSON-RPC over stdin/stdout",
     discussion: nil,
     signature: CommandSignatures.withRuntimeFlags(
-      CommandSignature(options: CommandSignatures.baseOptions())
+      CommandSignature(options: CommandSignatures.baseOptions()),
     ),
     usageExamples: [
       "imsg rpc",
       "imsg rpc --db ~/Library/Messages/chat.db",
-    ]
+    ],
   ) { values, runtime in
     let dbPath = values.option("db") ?? MessageStore.defaultPath
     let store = try MessageStore(path: dbPath)

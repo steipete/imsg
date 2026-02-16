@@ -8,7 +8,8 @@ func attachmentResolverResolvesPaths() throws {
   let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
   try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
   let file = dir.appendingPathComponent("test.txt")
-  try "hi".data(using: .utf8)!.write(to: file)
+  let payload = try #require("hi".data(using: .utf8))
+  try payload.write(to: file)
 
   let existing = AttachmentResolver.resolve(file.path)
   #expect(existing.missing == false)
@@ -24,7 +25,8 @@ func attachmentResolverResolvesPaths() throws {
 @Test
 func attachmentResolverDisplayNamePrefersTransfer() {
   #expect(
-    AttachmentResolver.displayName(filename: "file.dat", transferName: "nice.dat") == "nice.dat")
+    AttachmentResolver.displayName(filename: "file.dat", transferName: "nice.dat") == "nice.dat",
+  )
   #expect(AttachmentResolver.displayName(filename: "file.dat", transferName: "") == "file.dat")
   #expect(AttachmentResolver.displayName(filename: "", transferName: "") == "(unknown)")
 }
@@ -47,7 +49,7 @@ func iso8601ParserFormatsDates() {
 }
 
 @Test
-func messageFilterHonorsParticipantsAndDates() throws {
+func messageFilterHonorsParticipantsAndDates() {
   let now = Date(timeIntervalSince1970: 1000)
   let message = Message(
     rowID: 1,
@@ -58,12 +60,12 @@ func messageFilterHonorsParticipantsAndDates() throws {
     isFromMe: false,
     service: "iMessage",
     handleID: nil,
-    attachmentsCount: 0
+    attachmentsCount: 0,
   )
   let filter = MessageFilter(
     participants: ["alice"],
     startDate: now.addingTimeInterval(-10),
-    endDate: now.addingTimeInterval(10)
+    endDate: now.addingTimeInterval(10),
   )
   #expect(filter.allows(message) == true)
   let pastFilter = MessageFilter(startDate: now.addingTimeInterval(5))
@@ -89,8 +91,8 @@ func messageFilterRejectsInvalidISO() {
 
 @Test
 func typedStreamParserPrefersLongestSegment() {
-  let short = [UInt8(0x01), UInt8(0x2b)] + Array("short".utf8) + [0x86, 0x84]
-  let long = [UInt8(0x01), UInt8(0x2b)] + Array("longer text".utf8) + [0x86, 0x84]
+  let short = [UInt8(0x01), UInt8(0x2B)] + Array("short".utf8) + [0x86, 0x84]
+  let long = [UInt8(0x01), UInt8(0x2B)] + Array("longer text".utf8) + [0x86, 0x84]
   let data = Data(short + long)
   #expect(TypedStreamParser.parseAttributedBody(data) == "longer text")
 }
@@ -128,8 +130,8 @@ func messageSenderBuildsArguments() throws {
       text: "hi",
       attachmentPath: "",
       service: .auto,
-      region: "US"
-    )
+      region: "US",
+    ),
   )
   #expect(captured.count == 7)
   #expect(captured[0] == "+16502530000")
@@ -152,7 +154,7 @@ func messageSenderUsesChatIdentifier() throws {
   var captured: [String] = []
   let sender = MessageSender(
     runner: { _, args in captured = args },
-    attachmentsSubdirectoryProvider: { attachmentsSubdirectory }
+    attachmentsSubdirectoryProvider: { attachmentsSubdirectory },
   )
   try sender.send(
     MessageSendOptions(
@@ -162,8 +164,8 @@ func messageSenderUsesChatIdentifier() throws {
       service: .sms,
       region: "US",
       chatIdentifier: "iMessage;+;chat123",
-      chatGUID: "ignored-guid"
-    )
+      chatGUID: "ignored-guid",
+    ),
   )
   #expect(captured[5] == "ignored-guid")
   #expect(captured[6] == "1")
@@ -174,7 +176,7 @@ func messageSenderUsesChatIdentifier() throws {
 func messageSenderStagesAttachmentsBeforeSend() throws {
   let fileManager = FileManager.default
   let attachmentsSubdirectory = fileManager.temporaryDirectory.appendingPathComponent(
-    UUID().uuidString
+    UUID().uuidString,
   )
   try fileManager.createDirectory(at: attachmentsSubdirectory, withIntermediateDirectories: true)
   defer { try? fileManager.removeItem(at: attachmentsSubdirectory) }
@@ -188,7 +190,7 @@ func messageSenderStagesAttachmentsBeforeSend() throws {
   var captured: [String] = []
   let sender = MessageSender(
     runner: { _, args in captured = args },
-    attachmentsSubdirectoryProvider: { attachmentsSubdirectory }
+    attachmentsSubdirectoryProvider: { attachmentsSubdirectory },
   )
 
   try sender.send(
@@ -197,8 +199,8 @@ func messageSenderStagesAttachmentsBeforeSend() throws {
       text: "",
       attachmentPath: sourceFile.path,
       service: .imessage,
-      region: "US"
-    )
+      region: "US",
+    ),
   )
 
   let stagedPath = captured[3]
@@ -226,7 +228,7 @@ func messageSenderThrowsWhenAttachmentsSubdirectoryIsReadOnly() throws {
 
   let sender = MessageSender(
     runner: { _, _ in },
-    attachmentsSubdirectoryProvider: { readOnlyRoot }
+    attachmentsSubdirectoryProvider: { readOnlyRoot },
   )
 
   do {
@@ -236,8 +238,8 @@ func messageSenderThrowsWhenAttachmentsSubdirectoryIsReadOnly() throws {
         text: "",
         attachmentPath: sourceFile.path,
         service: .imessage,
-        region: "US"
-      )
+        region: "US",
+      ),
     )
     #expect(Bool(false))
   } catch {
@@ -249,7 +251,7 @@ func messageSenderThrowsWhenAttachmentsSubdirectoryIsReadOnly() throws {
 func messageSenderThrowsWhenAttachmentMissing() {
   let fileManager = FileManager.default
   let attachmentsSubdirectory = fileManager.temporaryDirectory.appendingPathComponent(
-    UUID().uuidString
+    UUID().uuidString,
   )
   try? fileManager.createDirectory(at: attachmentsSubdirectory, withIntermediateDirectories: true)
   defer { try? fileManager.removeItem(at: attachmentsSubdirectory) }
@@ -257,7 +259,7 @@ func messageSenderThrowsWhenAttachmentMissing() {
   var runnerCalled = false
   let sender = MessageSender(
     runner: { _, _ in runnerCalled = true },
-    attachmentsSubdirectoryProvider: { attachmentsSubdirectory }
+    attachmentsSubdirectoryProvider: { attachmentsSubdirectory },
   )
 
   do {
@@ -267,8 +269,8 @@ func messageSenderThrowsWhenAttachmentMissing() {
         text: "",
         attachmentPath: missingFile,
         service: .imessage,
-        region: "US"
-      )
+        region: "US",
+      ),
     )
     #expect(Bool(false))
   } catch let error as IMsgError {
@@ -294,8 +296,8 @@ func messageSenderTreatsHandleIdentifierAsRecipient() throws {
       service: .auto,
       region: "US",
       chatIdentifier: "+16502530000",
-      chatGUID: ""
-    )
+      chatGUID: "",
+    ),
   )
   #expect(captured[0] == "+16502530000")
   #expect(captured[5].isEmpty)

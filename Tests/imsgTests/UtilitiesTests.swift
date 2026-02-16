@@ -25,7 +25,7 @@ func attachmentDisplayPrefersTransferName() {
     totalBytes: 0,
     isSticker: false,
     originalPath: "",
-    missing: false
+    missing: false,
   )
   #expect(displayName(for: meta) == "friendly.dat")
   let fallback = AttachmentMeta(
@@ -36,7 +36,7 @@ func attachmentDisplayPrefersTransferName() {
     totalBytes: 0,
     isSticker: false,
     originalPath: "",
-    missing: false
+    missing: false,
   )
   #expect(displayName(for: fallback) == "file.dat")
   let unknown = AttachmentMeta(
@@ -47,7 +47,7 @@ func attachmentDisplayPrefersTransferName() {
     totalBytes: 0,
     isSticker: false,
     originalPath: "",
-    missing: false
+    missing: false,
   )
   #expect(displayName(for: unknown) == "(unknown)")
   #expect(pluralSuffix(for: 1) == "")
@@ -57,7 +57,7 @@ func attachmentDisplayPrefersTransferName() {
 @Test
 func jsonLinesPrintsSingleLineJSON() throws {
   let line = try JSONLines.encode(["status": "ok"])
-  let data = line.data(using: .utf8)!
+  let data = try #require(line.data(using: .utf8))
   let decoded = try JSONSerialization.jsonObject(with: data) as? [String: Any]
   #expect(decoded?["status"] as? String == "ok")
 }
@@ -66,7 +66,8 @@ func jsonLinesPrintsSingleLineJSON() throws {
 func outputModelsEncodeExpectedKeys() throws {
   let chat = Chat(
     id: 1, identifier: "+123", name: "Test", service: "iMessage",
-    lastMessageAt: Date(timeIntervalSince1970: 0))
+    lastMessageAt: Date(timeIntervalSince1970: 0),
+  )
   let chatPayload = ChatPayload(chat: chat)
   let chatData = try JSONEncoder().encode(chatPayload)
   let chatObject = try JSONSerialization.jsonObject(with: chatData) as? [String: Any]
@@ -84,7 +85,7 @@ func outputModelsEncodeExpectedKeys() throws {
     attachmentsCount: 0,
     guid: "msg-guid-7",
     replyToGUID: "msg-guid-1",
-    threadOriginatorGUID: "thread-guid-7"
+    threadOriginatorGUID: "thread-guid-7",
   )
   let attachment = AttachmentMeta(
     filename: "file.dat",
@@ -94,7 +95,7 @@ func outputModelsEncodeExpectedKeys() throws {
     totalBytes: 10,
     isSticker: false,
     originalPath: "/tmp/file.dat",
-    missing: false
+    missing: false,
   )
   let reaction = Reaction(
     rowID: 99,
@@ -102,10 +103,11 @@ func outputModelsEncodeExpectedKeys() throws {
     sender: "+123",
     isFromMe: true,
     date: Date(timeIntervalSince1970: 2),
-    associatedMessageID: 7
+    associatedMessageID: 7,
   )
   let messagePayload = MessagePayload(
-    message: message, attachments: [attachment], reactions: [reaction])
+    message: message, attachments: [attachment], reactions: [reaction],
+  )
   let messageData = try JSONEncoder().encode(messagePayload)
   let messageObject = try JSONSerialization.jsonObject(with: messageData) as? [String: Any]
   #expect(messageObject?["chat_id"] as? Int64 == 1)
@@ -122,11 +124,39 @@ func outputModelsEncodeExpectedKeys() throws {
 }
 
 @Test
+func messagePayloadEncodesReactionEventMetadata() throws {
+  let message = Message(
+    rowID: 8,
+    chatID: 1,
+    sender: "+123",
+    text: "Liked \"hi\"",
+    date: Date(timeIntervalSince1970: 1),
+    isFromMe: false,
+    service: "iMessage",
+    handleID: nil,
+    attachmentsCount: 0,
+    guid: "msg-guid-8",
+    isReaction: true,
+    reactionType: .like,
+    isReactionAdd: false,
+    reactedToGUID: "msg-guid-1",
+  )
+  let payload = MessagePayload(message: message, attachments: [], reactions: [])
+  let data = try JSONEncoder().encode(payload)
+  let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+  #expect(object?["is_reaction"] as? Bool == true)
+  #expect(object?["reaction_type"] as? String == "like")
+  #expect(object?["reaction_emoji"] as? String == "👍")
+  #expect(object?["is_reaction_add"] as? Bool == false)
+  #expect(object?["reacted_to_guid"] as? String == "msg-guid-1")
+}
+
+@Test
 func parsedValuesHelpers() throws {
   let values = ParsedValues(
     positional: ["first"],
     options: ["limit": ["5", "9"], "name": ["bob"], "logLevel": ["debug"]],
-    flags: ["jsonOutput", "verbose"]
+    flags: ["jsonOutput", "verbose"],
   )
   #expect(values.flag("jsonOutput") == true)
   #expect(values.option("name") == "bob")

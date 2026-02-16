@@ -3,7 +3,7 @@ import SQLite
 
 extension MessageStore {
   public func messages(chatID: Int64, limit: Int) throws -> [Message] {
-    return try messages(chatID: chatID, limit: limit, filter: nil)
+    try messages(chatID: chatID, limit: limit, filter: nil)
   }
 
   public func messages(chatID: Int64, limit: Int, filter: MessageFilter?) throws -> [Message] {
@@ -44,7 +44,8 @@ extension MessageStore {
       }
       if !filter.participants.isEmpty {
         let placeholders = Array(repeating: "?", count: filter.participants.count).joined(
-          separator: ",")
+          separator: ",",
+        )
         // Match current in-memory behavior: Message.sender is either handle.id or destination_caller_id.
         sql +=
           " AND COALESCE(NULLIF(h.id,''), \(destinationCallerColumn)) COLLATE NOCASE IN (\(placeholders))"
@@ -85,7 +86,7 @@ extension MessageStore {
         let service = stringValue(row[colService])
         let isAudioMessage = boolValue(row[colIsAudioMessage])
         let destinationCallerID = stringValue(row[colDestinationCallerID])
-        if sender.isEmpty && !destinationCallerID.isEmpty {
+        if sender.isEmpty, !destinationCallerID.isEmpty {
           sender = destinationCallerID
         }
         let guid = stringValue(row[colGUID])
@@ -100,7 +101,7 @@ extension MessageStore {
         }
         let replyToGUID = replyToGUID(
           associatedGuid: associatedGuid,
-          associatedType: associatedType
+          associatedType: associatedType,
         )
         messages.append(
           Message(
@@ -115,18 +116,23 @@ extension MessageStore {
             attachmentsCount: attachments,
             guid: guid,
             replyToGUID: replyToGUID,
-            threadOriginatorGUID: threadOriginatorGUID.isEmpty ? nil : threadOriginatorGUID
-          ))
+            threadOriginatorGUID: threadOriginatorGUID.isEmpty ? nil : threadOriginatorGUID,
+          ),
+        )
       }
       return messages
     }
   }
 
   public func messagesAfter(afterRowID: Int64, chatID: Int64?, limit: Int) throws -> [Message] {
-    return try messagesAfter(afterRowID: afterRowID, chatID: chatID, limit: limit, includeReactions: false)
+    try messagesAfter(
+      afterRowID: afterRowID, chatID: chatID, limit: limit, includeReactions: false,
+    )
   }
 
-  public func messagesAfter(afterRowID: Int64, chatID: Int64?, limit: Int, includeReactions: Bool) throws -> [Message] {
+  public func messagesAfter(afterRowID: Int64, chatID: Int64?, limit: Int, includeReactions: Bool)
+    throws -> [Message]
+  {
     let bodyColumn = hasAttributedBody ? "m.attributedBody" : "NULL"
     let guidColumn = hasReactionColumns ? "m.guid" : "NULL"
     let associatedGuidColumn = hasReactionColumns ? "m.associated_message_guid" : "NULL"
@@ -136,14 +142,14 @@ extension MessageStore {
     let threadOriginatorColumn =
       hasThreadOriginatorGUIDColumn ? "m.thread_originator_guid" : "NULL"
     // Only filter out reactions if includeReactions is false
-    let reactionFilter: String
-    if includeReactions {
-      reactionFilter = ""
-    } else {
-      reactionFilter = hasReactionColumns
-        ? " AND (m.associated_message_type IS NULL OR m.associated_message_type < 2000 OR m.associated_message_type > 3006)"
-        : ""
-    }
+    let reactionFilter: String =
+      if includeReactions {
+        ""
+      } else {
+        hasReactionColumns
+          ? " AND (m.associated_message_type IS NULL OR m.associated_message_type < 2000 OR m.associated_message_type > 3006)"
+          : ""
+      }
     var sql = """
       SELECT m.ROWID, cmj.chat_id, m.handle_id, h.id, IFNULL(m.text, '') AS text, m.date, m.is_from_me, m.service,
              \(audioMessageColumn) AS is_audio_message, \(destinationCallerColumn) AS destination_caller_id,
@@ -194,7 +200,7 @@ extension MessageStore {
         let service = stringValue(row[colService])
         let isAudioMessage = boolValue(row[colIsAudioMessage])
         let destinationCallerID = stringValue(row[colDestinationCallerID])
-        if sender.isEmpty && !destinationCallerID.isEmpty {
+        if sender.isEmpty, !destinationCallerID.isEmpty {
           sender = destinationCallerID
         }
         let guid = stringValue(row[colGUID])
@@ -209,24 +215,25 @@ extension MessageStore {
         }
         let replyToGUID = replyToGUID(
           associatedGuid: associatedGuid,
-          associatedType: associatedType
+          associatedType: associatedType,
         )
-        
+
         // Determine if this is a reaction event
         let typeValue = associatedType ?? 0
         let isReactionEvent = ReactionType.isReaction(typeValue)
         var reactionType: ReactionType? = nil
         var isReactionAdd: Bool? = nil
         var reactedToGUID: String? = nil
-        
+
         if isReactionEvent {
           isReactionAdd = ReactionType.isReactionAdd(typeValue)
           let rawType = (isReactionAdd ?? true) ? typeValue : typeValue - 1000
-          let customEmoji: String? = (rawType == 2006) ? extractCustomEmoji(from: resolvedText) : nil
+          let customEmoji: String? =
+            (rawType == 2006) ? extractCustomEmoji(from: resolvedText) : nil
           reactionType = ReactionType(rawValue: rawType, customEmoji: customEmoji)
           reactedToGUID = normalizeAssociatedGUID(associatedGuid)
         }
-        
+
         messages.append(
           Message(
             rowID: rowID,
@@ -244,8 +251,9 @@ extension MessageStore {
             isReaction: isReactionEvent,
             reactionType: reactionType,
             isReactionAdd: isReactionAdd,
-            reactedToGUID: reactedToGUID
-          ))
+            reactedToGUID: reactedToGUID,
+          ),
+        )
       }
       return messages
     }

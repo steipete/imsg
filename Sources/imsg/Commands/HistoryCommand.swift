@@ -14,21 +14,23 @@ enum HistoryCommand {
           .make(label: "limit", names: [.long("limit")], help: "Number of messages to show"),
           .make(
             label: "participants", names: [.long("participants")],
-            help: "filter by participant handles", parsing: .upToNextOption),
+            help: "filter by participant handles", parsing: .upToNextOption,
+          ),
           .make(label: "start", names: [.long("start")], help: "ISO8601 start (inclusive)"),
           .make(label: "end", names: [.long("end")], help: "ISO8601 end (exclusive)"),
         ],
         flags: [
           .make(
-            label: "attachments", names: [.long("attachments")], help: "include attachment metadata"
+            label: "attachments", names: [.long("attachments")],
+            help: "include attachment metadata",
           )
-        ]
-      )
+        ],
+      ),
     ),
     usageExamples: [
       "imsg history --chat-id 1 --limit 10 --attachments",
       "imsg history --chat-id 1 --start 2025-01-01T00:00:00Z --json",
-    ]
+    ],
   ) { values, runtime in
     guard let chatID = values.optionInt64("chatID") else {
       throw ParsedValuesError.missingOption("chat-id")
@@ -42,7 +44,7 @@ enum HistoryCommand {
     let filter = try MessageFilter.fromISO(
       participants: participants,
       startISO: values.option("start"),
-      endISO: values.option("end")
+      endISO: values.option("end"),
     )
 
     let store = try MessageStore(path: dbPath)
@@ -55,7 +57,7 @@ enum HistoryCommand {
         let payload = MessagePayload(
           message: message,
           attachments: attachments,
-          reactions: reactions
+          reactions: reactions,
         )
         try StdoutWriter.writeJSONLine(payload)
       }
@@ -72,12 +74,12 @@ enum HistoryCommand {
           for meta in metas {
             let name = displayName(for: meta)
             StdoutWriter.writeLine(
-              "  attachment: name=\(name) mime=\(meta.mimeType) missing=\(meta.missing) path=\(meta.originalPath)"
+              "  attachment: name=\(name) mime=\(meta.mimeType) missing=\(meta.missing) path=\(meta.originalPath)",
             )
           }
         } else {
           StdoutWriter.writeLine(
-            "  (\(message.attachmentsCount) attachment\(pluralSuffix(for: message.attachmentsCount)))"
+            "  (\(message.attachmentsCount) attachment\(pluralSuffix(for: message.attachmentsCount)))",
           )
         }
       }

@@ -16,7 +16,7 @@ enum StdoutWriter {
     }
   }
 
-  static func writeJSONLine<T: Encodable>(_ value: T) throws {
+  static func writeJSONLine(_ value: some Encodable) throws {
     let data = try jsonEncoder.encode(value)
     guard let line = String(data: data, encoding: .utf8), !line.isEmpty else { return }
     writeLine(line)

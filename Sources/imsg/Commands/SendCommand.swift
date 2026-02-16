@@ -14,23 +14,26 @@ enum SendCommand {
           .make(label: "chatID", names: [.long("chat-id")], help: "chat rowid"),
           .make(
             label: "chatIdentifier", names: [.long("chat-identifier")],
-            help: "chat identifier (e.g. iMessage;+;chat...)"),
+            help: "chat identifier (e.g. iMessage;+;chat...)",
+          ),
           .make(label: "chatGUID", names: [.long("chat-guid")], help: "chat guid"),
           .make(label: "text", names: [.long("text")], help: "message body"),
           .make(label: "file", names: [.long("file")], help: "path to attachment"),
           .make(
-            label: "service", names: [.long("service")], help: "service to use: imessage|sms|auto"),
+            label: "service", names: [.long("service")], help: "service to use: imessage|sms|auto",
+          ),
           .make(
             label: "region", names: [.long("region")],
-            help: "default region for phone normalization"),
-        ]
-      )
+            help: "default region for phone normalization",
+          ),
+        ],
+      ),
     ),
     usageExamples: [
       "imsg send --to +14155551212 --text \"hi\"",
       "imsg send --to +14155551212 --text \"hi\" --file ~/Desktop/pic.jpg --service imessage",
       "imsg send --chat-id 1 --text \"hi\"",
-    ]
+    ],
   ) { values, runtime in
     try await run(values: values, runtime: runtime)
   }
@@ -39,7 +42,7 @@ enum SendCommand {
     values: ParsedValues,
     runtime: RuntimeOptions,
     sendMessage: @escaping (MessageSendOptions) throws -> Void = { try MessageSender().send($0) },
-    storeFactory: @escaping (String) throws -> MessageStore = { try MessageStore(path: $0) }
+    storeFactory: @escaping (String) throws -> MessageStore = { try MessageStore(path: $0) },
   ) async throws {
     let dbPath = values.option("db") ?? MessageStore.defaultPath
     let recipient = values.option("to") ?? ""
@@ -47,16 +50,16 @@ enum SendCommand {
     let chatIdentifier = values.option("chatIdentifier") ?? ""
     let chatGUID = values.option("chatGUID") ?? ""
     let hasChatTarget = chatID != nil || !chatIdentifier.isEmpty || !chatGUID.isEmpty
-    if hasChatTarget && !recipient.isEmpty {
+    if hasChatTarget, !recipient.isEmpty {
       throw ParsedValuesError.invalidOption("to")
     }
-    if !hasChatTarget && recipient.isEmpty {
+    if !hasChatTarget, recipient.isEmpty {
       throw ParsedValuesError.missingOption("to")
     }
 
     let text = values.option("text") ?? ""
     let file = values.option("file") ?? ""
-    if text.isEmpty && file.isEmpty {
+    if text.isEmpty, file.isEmpty {
       throw ParsedValuesError.missingOption("text or file")
     }
     let serviceRaw = values.option("service") ?? "auto"
@@ -75,7 +78,7 @@ enum SendCommand {
       resolvedChatIdentifier = info.identifier
       resolvedChatGUID = info.guid
     }
-    if hasChatTarget && resolvedChatIdentifier.isEmpty && resolvedChatGUID.isEmpty {
+    if hasChatTarget, resolvedChatIdentifier.isEmpty, resolvedChatGUID.isEmpty {
       throw IMsgError.invalidChatTarget("Missing chat identifier or guid")
     }
 
@@ -87,8 +90,9 @@ enum SendCommand {
         service: service,
         region: region,
         chatIdentifier: resolvedChatIdentifier,
-        chatGUID: resolvedChatGUID
-      ))
+        chatGUID: resolvedChatGUID,
+      ),
+    )
 
     if runtime.jsonOutput {
       try StdoutWriter.writeJSONLine(["status": "sent"])

@@ -13,7 +13,7 @@ struct CommandSpec: @unchecked Sendable {
       name: name,
       abstract: abstract,
       discussion: discussion,
-      signature: signature
+      signature: signature,
     )
   }
 }

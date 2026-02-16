@@ -7,7 +7,9 @@ public struct MessageWatcherConfiguration: Sendable, Equatable {
   /// When true, reaction events (tapback add/remove) are included in the stream
   public var includeReactions: Bool
 
-  public init(debounceInterval: TimeInterval = 0.25, batchLimit: Int = 100, includeReactions: Bool = false) {
+  public init(
+    debounceInterval: TimeInterval = 0.25, batchLimit: Int = 100, includeReactions: Bool = false,
+  ) {
     self.debounceInterval = debounceInterval
     self.batchLimit = batchLimit
     self.includeReactions = includeReactions
@@ -24,7 +26,7 @@ public final class MessageWatcher: @unchecked Sendable {
   public func stream(
     chatID: Int64? = nil,
     sinceRowID: Int64? = nil,
-    configuration: MessageWatcherConfiguration = MessageWatcherConfiguration()
+    configuration: MessageWatcherConfiguration = MessageWatcherConfiguration(),
   ) -> AsyncThrowingStream<Message, Error> {
     AsyncThrowingStream { continuation in
       let state = WatchState(
@@ -32,7 +34,7 @@ public final class MessageWatcher: @unchecked Sendable {
         chatID: chatID,
         sinceRowID: sinceRowID,
         configuration: configuration,
-        continuation: continuation
+        continuation: continuation,
       )
       state.start()
       continuation.onTermination = { _ in
@@ -58,13 +60,13 @@ private final class WatchState: @unchecked Sendable {
     chatID: Int64?,
     sinceRowID: Int64?,
     configuration: MessageWatcherConfiguration,
-    continuation: AsyncThrowingStream<Message, Error>.Continuation
+    continuation: AsyncThrowingStream<Message, Error>.Continuation,
   ) {
     self.store = store
     self.chatID = chatID
     self.configuration = configuration
     self.continuation = continuation
-    self.cursor = sinceRowID ?? 0
+    cursor = sinceRowID ?? 0
   }
 
   func start() {
@@ -85,7 +87,6 @@ private final class WatchState: @unchecked Sendable {
         sources.append(source)
       }
     }
-
   }
 
   func stop() {
@@ -103,7 +104,7 @@ private final class WatchState: @unchecked Sendable {
     let source = DispatchSource.makeFileSystemObjectSource(
       fileDescriptor: fd,
       eventMask: [.write, .extend, .rename, .delete],
-      queue: queue
+      queue: queue,
     )
     source.setEventHandler { [weak self] in
       self?.schedulePoll()
@@ -121,8 +122,8 @@ private final class WatchState: @unchecked Sendable {
     let delay = configuration.debounceInterval
     queue.asyncAfter(deadline: .now() + delay) { [weak self] in
       guard let self else { return }
-      self.pending = false
-      self.poll()
+      pending = false
+      poll()
     }
   }
 
@@ -132,7 +133,7 @@ private final class WatchState: @unchecked Sendable {
         afterRowID: cursor,
         chatID: chatID,
         limit: configuration.batchLimit,
-        includeReactions: configuration.includeReactions
+        includeReactions: configuration.includeReactions,
       )
       for message in messages {
         continuation.yield(message)

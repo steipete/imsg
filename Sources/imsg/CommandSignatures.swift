@@ -7,7 +7,7 @@ enum CommandSignatures {
       .make(
         label: "db",
         names: [.long("db")],
-        help: "Path to chat.db (defaults to ~/Library/Messages/chat.db)"
+        help: "Path to chat.db (defaults to ~/Library/Messages/chat.db)",
       )
     ]
   }

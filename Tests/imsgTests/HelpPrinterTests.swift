@@ -5,7 +5,7 @@ import Testing
 @testable import imsg
 
 @Test
-func helpPrinterPrintsCommandDetails() throws {
+func helpPrinterPrintsCommandDetails() {
   let signature = CommandSignature(
     arguments: [
       .make(label: "arg", help: "arg help")
@@ -15,14 +15,14 @@ func helpPrinterPrintsCommandDetails() throws {
     ],
     flags: [
       .make(label: "flag", names: [.short("f"), .long("flag")], help: "flag help")
-    ]
+    ],
   )
   let spec = CommandSpec(
     name: "demo",
     abstract: "Demo command",
     discussion: "Extra details",
     signature: signature,
-    usageExamples: ["imsg demo --opt 1"]
+    usageExamples: ["imsg demo --opt 1"],
   ) { _, _ in }
 
   let lines = HelpPrinter.renderCommand(rootName: "imsg", spec: spec)

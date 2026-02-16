@@ -8,9 +8,9 @@ func chatPayload(
   name: String,
   service: String,
   lastMessageAt: Date,
-  participants: [String]
+  participants: [String],
 ) -> [String: Any] {
-  return [
+  [
     "id": id,
     "identifier": identifier,
     "guid": guid,
@@ -27,7 +27,7 @@ func messagePayload(
   chatInfo: ChatInfo?,
   participants: [String],
   attachments: [AttachmentMeta],
-  reactions: [Reaction]
+  reactions: [Reaction],
 ) -> [String: Any] {
   let identifier = chatInfo?.identifier ?? ""
   let guid = chatInfo?.guid ?? ""
@@ -51,20 +51,7 @@ func messagePayload(
   if let replyToGUID = message.replyToGUID, !replyToGUID.isEmpty {
     payload["reply_to_guid"] = replyToGUID
   }
-  // Add reaction event metadata if this message is a reaction
-  if message.isReaction {
-    payload["is_reaction"] = true
-    if let reactionType = message.reactionType {
-      payload["reaction_type"] = reactionType.name
-      payload["reaction_emoji"] = reactionType.emoji
-    }
-    if let isReactionAdd = message.isReactionAdd {
-      payload["is_reaction_add"] = isReactionAdd
-    }
-    if let reactedToGUID = message.reactedToGUID, !reactedToGUID.isEmpty {
-      payload["reacted_to_guid"] = reactedToGUID
-    }
-  }
+  ReactionEventMetadata(message: message).merge(into: &payload)
   if let threadOriginatorGUID = message.threadOriginatorGUID, !threadOriginatorGUID.isEmpty {
     payload["thread_originator_guid"] = threadOriginatorGUID
   }
@@ -72,7 +59,7 @@ func messagePayload(
 }
 
 func attachmentPayload(_ meta: AttachmentMeta) -> [String: Any] {
-  return [
+  [
     "filename": meta.filename,
     "transfer_name": meta.transferName,
     "uti": meta.uti,
@@ -85,7 +72,7 @@ func attachmentPayload(_ meta: AttachmentMeta) -> [String: Any] {
 }
 
 func reactionPayload(_ reaction: Reaction) -> [String: Any] {
-  return [
+  [
     "id": reaction.rowID,
     "type": reaction.reactionType.name,
     "emoji": reaction.reactionType.emoji,

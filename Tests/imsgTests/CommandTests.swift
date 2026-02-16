@@ -6,13 +6,17 @@ import Testing
 @testable import IMsgCore
 @testable import imsg
 
-private enum CommandTestDatabase {
+enum CommandTestDatabase {
   static func appleEpoch(_ date: Date) -> Int64 {
     let seconds = date.timeIntervalSince1970 - MessageStore.appleEpochOffset
     return Int64(seconds * 1_000_000_000)
   }
 
-  static func makePath() throws -> String {
+  static func makePath(
+    chatIdentifier: String = "+123",
+    chatGUID: String = "iMessage;+;chat123",
+    chatName: String = "Test Chat",
+  ) throws -> String {
     let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
     let path = dir.appendingPathComponent("chat.db").path
@@ -27,7 +31,7 @@ private enum CommandTestDatabase {
         is_from_me INTEGER,
         service TEXT
       );
-      """
+      """,
     )
     try db.execute(
       """
@@ -38,12 +42,13 @@ private enum CommandTestDatabase {
         display_name TEXT,
         service_name TEXT
       );
-      """
+      """,
     )
     try db.execute("CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT);")
     try db.execute("CREATE TABLE chat_message_join (chat_id INTEGER, message_id INTEGER);")
     try db.execute(
-      "CREATE TABLE message_attachment_join (message_id INTEGER, attachment_id INTEGER);")
+      "CREATE TABLE message_attachment_join (message_id INTEGER, attachment_id INTEGER);",
+    )
     try db.execute(
       """
       CREATE TABLE attachment (
@@ -55,15 +60,19 @@ private enum CommandTestDatabase {
         total_bytes INTEGER,
         is_sticker INTEGER
       );
-      """
+      """,
     )
 
     let now = Date()
     try db.run(
       """
       INSERT INTO chat(ROWID, chat_identifier, guid, display_name, service_name)
-      VALUES (1, '+123', 'iMessage;+;chat123', 'Test Chat', 'iMessage')
-      """
+      VALUES (1, ?, ?, ?, 'iMessage')
+      """,
+
+      chatIdentifier,
+      chatGUID,
+      chatName,
     )
     try db.run("INSERT INTO handle(ROWID, id) VALUES (1, '+123')")
     try db.run(
@@ -71,7 +80,7 @@ private enum CommandTestDatabase {
       INSERT INTO message(ROWID, handle_id, text, date, is_from_me, service)
       VALUES (1, 1, 'hello', ?, 0, 'iMessage')
       """,
-      appleEpoch(now)
+      appleEpoch(now),
     )
     try db.run("INSERT INTO chat_message_join(chat_id, message_id) VALUES (1, 1)")
     return path
@@ -84,7 +93,7 @@ private enum CommandTestDatabase {
       """
       INSERT INTO attachment(ROWID, filename, transfer_name, uti, mime_type, total_bytes, is_sticker)
       VALUES (1, '/tmp/file.dat', 'file.dat', 'public.data', 'application/octet-stream', 10, 0)
-      """
+      """,
     )
     try db.run("INSERT INTO message_attachment_join(message_id, attachment_id) VALUES (1, 1)")
     return path
@@ -97,7 +106,7 @@ func chatsCommandRunsWithJsonOutput() async throws {
   let values = ParsedValues(
     positional: [],
     options: ["db": [path], "limit": ["5"]],
-    flags: ["jsonOutput"]
+    flags: ["jsonOutput"],
   )
   let runtime = RuntimeOptions(parsedValues: values)
   _ = try await StdoutCapture.capture {
@@ -111,7 +120,7 @@ func historyCommandRunsWithChatID() async throws {
   let values = ParsedValues(
     positional: [],
     options: ["db": [path], "chatID": ["1"], "limit": ["5"]],
-    flags: ["jsonOutput"]
+    flags: ["jsonOutput"],
   )
   let runtime = RuntimeOptions(parsedValues: values)
   _ = try await StdoutCapture.capture {
@@ -125,7 +134,7 @@ func historyCommandRunsWithAttachmentsNonJson() async throws {
   let values = ParsedValues(
     positional: [],
     options: ["db": [path], "chatID": ["1"], "limit": ["5"]],
-    flags: ["attachments"]
+    flags: ["attachments"],
   )
   let runtime = RuntimeOptions(parsedValues: values)
   _ = try await StdoutCapture.capture {
@@ -139,7 +148,7 @@ func chatsCommandRunsWithPlainOutput() async throws {
   let values = ParsedValues(
     positional: [],
     options: ["db": [path], "limit": ["5"]],
-    flags: []
+    flags: [],
   )
   let runtime = RuntimeOptions(parsedValues: values)
   _ = try await StdoutCapture.capture {
@@ -152,7 +161,7 @@ func sendCommandRejectsMissingRecipient() async {
   let values = ParsedValues(
     positional: [],
     options: ["text": ["hi"]],
-    flags: []
+    flags: [],
   )
   let runtime = RuntimeOptions(parsedValues: values)
   do {
@@ -170,7 +179,7 @@ func sendCommandRunsWithStubSender() async throws {
   let values = ParsedValues(
     positional: [],
     options: ["to": ["+15551234567"], "text": ["hi"]],
-    flags: []
+    flags: [],
   )
   let runtime = RuntimeOptions(parsedValues: values)
   var captured: MessageSendOptions?
@@ -178,7 +187,8 @@ func sendCommandRunsWithStubSender() async throws {
     values: values, runtime: runtime,
     sendMessage: { options in
       captured = options
-    })
+    },
+  )
   #expect(captured?.recipient == "+15551234567")
   #expect(captured?.text == "hi")
 }
@@ -189,7 +199,7 @@ func sendCommandResolvesChatID() async throws {
   let values = ParsedValues(
     positional: [],
     options: ["db": [path], "chatID": ["1"], "text": ["hi"]],
-    flags: []
+    flags: [],
   )
   let runtime = RuntimeOptions(parsedValues: values)
   var captured: MessageSendOptions?
@@ -197,87 +207,11 @@ func sendCommandResolvesChatID() async throws {
     values: values, runtime: runtime,
     sendMessage: { options in
       captured = options
-    })
+    },
+  )
   #expect(captured?.chatIdentifier == "+123")
   #expect(captured?.chatGUID == "iMessage;+;chat123")
   #expect(captured?.recipient.isEmpty == true)
-}
-
-@Test
-func reactCommandRejectsMultiCharacterEmojiInput() async {
-  do {
-    let path = try CommandTestDatabase.makePath()
-    let values = ParsedValues(
-      positional: [],
-      options: ["db": [path], "chatID": ["1"], "reaction": ["🎉 party"]],
-      flags: []
-    )
-    let runtime = RuntimeOptions(parsedValues: values)
-    try await ReactCommand.run(values: values, runtime: runtime)
-    #expect(Bool(false))
-  } catch let error as IMsgError {
-    switch error {
-    case .invalidReaction(let value):
-      #expect(value == "🎉 party")
-    default:
-      #expect(Bool(false))
-    }
-  } catch {
-    #expect(Bool(false))
-  }
-}
-
-@Test
-func reactCommandBuildsParameterizedAppleScriptForStandardTapback() async throws {
-  let path = try CommandTestDatabase.makePath()
-  let values = ParsedValues(
-    positional: [],
-    options: ["db": [path], "chatID": ["1"], "reaction": ["like"]],
-    flags: []
-  )
-  let runtime = RuntimeOptions(parsedValues: values)
-  var capturedScript = ""
-  var capturedArguments: [String] = []
-  try await ReactCommand.run(
-    values: values,
-    runtime: runtime,
-    appleScriptRunner: { source, arguments in
-      capturedScript = source
-      capturedArguments = arguments
-    }
-  )
-  #expect(capturedArguments == ["iMessage;+;chat123", "Test Chat", "2"])
-  #expect(capturedScript.contains("on run argv"))
-  #expect(capturedScript.contains("keystroke \"f\" using command down"))
-  #expect(capturedScript.contains("set targetChat to chat id chatGUID"))
-  #expect(capturedScript.contains("keystroke reactionKey"))
-  #expect(capturedScript.contains("chat123") == false)
-}
-
-@Test
-func reactCommandBuildsParameterizedAppleScriptForCustomEmoji() async throws {
-  let path = try CommandTestDatabase.makePath()
-  let values = ParsedValues(
-    positional: [],
-    options: ["db": [path], "chatID": ["1"], "reaction": ["🎉"]],
-    flags: []
-  )
-  let runtime = RuntimeOptions(parsedValues: values)
-  var capturedScript = ""
-  var capturedArguments: [String] = []
-  try await ReactCommand.run(
-    values: values,
-    runtime: runtime,
-    appleScriptRunner: { source, arguments in
-      capturedScript = source
-      capturedArguments = arguments
-    }
-  )
-  #expect(capturedArguments == ["iMessage;+;chat123", "Test Chat", "🎉"])
-  #expect(capturedScript.contains("on run argv"))
-  #expect(capturedScript.contains("keystroke customEmoji"))
-  #expect(capturedScript.contains("key code 36"))
-  #expect(capturedScript.contains("chat123") == false)
 }
 
 @Test
@@ -285,7 +219,7 @@ func watchCommandRejectsInvalidDebounce() async {
   let values = ParsedValues(
     positional: [],
     options: ["debounce": ["nope"]],
-    flags: []
+    flags: [],
   )
   let runtime = RuntimeOptions(parsedValues: values)
   do {
@@ -305,7 +239,7 @@ func watchCommandRunsWithStubStream() async throws {
   let values = ParsedValues(
     positional: [],
     options: ["db": ["/tmp/unused"], "debounce": ["1ms"]],
-    flags: []
+    flags: [],
   )
   let runtime = RuntimeOptions(parsedValues: values)
   let db = try Connection(.inMemory)
@@ -313,7 +247,7 @@ func watchCommandRunsWithStubStream() async throws {
     connection: db,
     path: ":memory:",
     hasAttributedBody: false,
-    hasReactionColumns: false
+    hasReactionColumns: false,
   )
   let message = Message(
     rowID: 1,
@@ -324,14 +258,14 @@ func watchCommandRunsWithStubStream() async throws {
     isFromMe: false,
     service: "iMessage",
     handleID: nil,
-    attachmentsCount: 2
+    attachmentsCount: 2,
   )
   let streamProvider:
     (
       MessageWatcher,
       Int64?,
       Int64?,
-      MessageWatcherConfiguration
+      MessageWatcherConfiguration,
     ) -> AsyncThrowingStream<Message, Error> = { _, _, _, _ in
       AsyncThrowingStream { continuation in
         continuation.yield(message)
@@ -343,7 +277,7 @@ func watchCommandRunsWithStubStream() async throws {
       values: values,
       runtime: runtime,
       storeFactory: { _ in store },
-      streamProvider: streamProvider
+      streamProvider: streamProvider,
     )
   }
 }
@@ -353,7 +287,7 @@ func watchCommandRunsWithJsonOutput() async throws {
   let values = ParsedValues(
     positional: [],
     options: ["db": ["/tmp/unused"], "debounce": ["1ms"]],
-    flags: ["jsonOutput"]
+    flags: ["jsonOutput"],
   )
   let runtime = RuntimeOptions(parsedValues: values)
   let db = try Connection(.inMemory)
@@ -368,15 +302,16 @@ func watchCommandRunsWithJsonOutput() async throws {
       total_bytes INTEGER,
       is_sticker INTEGER
     );
-    """
+    """,
   )
   try db.execute(
-    "CREATE TABLE message_attachment_join (message_id INTEGER, attachment_id INTEGER);")
+    "CREATE TABLE message_attachment_join (message_id INTEGER, attachment_id INTEGER);",
+  )
   try db.run(
     """
     INSERT INTO attachment(ROWID, filename, transfer_name, uti, mime_type, total_bytes, is_sticker)
     VALUES (1, '/tmp/file.dat', 'file.dat', 'public.data', 'application/octet-stream', 10, 0)
-    """
+    """,
   )
   try db.run("INSERT INTO message_attachment_join(message_id, attachment_id) VALUES (1, 1)")
 
@@ -384,7 +319,7 @@ func watchCommandRunsWithJsonOutput() async throws {
     connection: db,
     path: ":memory:",
     hasAttributedBody: false,
-    hasReactionColumns: false
+    hasReactionColumns: false,
   )
   let message = Message(
     rowID: 1,
@@ -395,14 +330,14 @@ func watchCommandRunsWithJsonOutput() async throws {
     isFromMe: false,
     service: "iMessage",
     handleID: nil,
-    attachmentsCount: 1
+    attachmentsCount: 1,
   )
   let streamProvider:
     (
       MessageWatcher,
       Int64?,
       Int64?,
-      MessageWatcherConfiguration
+      MessageWatcherConfiguration,
     ) -> AsyncThrowingStream<Message, Error> = { _, _, _, _ in
       AsyncThrowingStream { continuation in
         continuation.yield(message)
@@ -414,7 +349,7 @@ func watchCommandRunsWithJsonOutput() async throws {
       values: values,
       runtime: runtime,
       storeFactory: { _ in store },
-      streamProvider: streamProvider
+      streamProvider: streamProvider,
     )
   }
 }
@@ -424,7 +359,7 @@ func watchCommandFlushesPlainOutput() async throws {
   let values = ParsedValues(
     positional: [],
     options: ["db": ["/tmp/unused"], "debounce": ["1ms"]],
-    flags: []
+    flags: [],
   )
   let runtime = RuntimeOptions(parsedValues: values)
   let db = try Connection(.inMemory)
@@ -432,7 +367,7 @@ func watchCommandFlushesPlainOutput() async throws {
     connection: db,
     path: ":memory:",
     hasAttributedBody: false,
-    hasReactionColumns: false
+    hasReactionColumns: false,
   )
   let message = Message(
     rowID: 1,
@@ -443,14 +378,14 @@ func watchCommandFlushesPlainOutput() async throws {
     isFromMe: false,
     service: "iMessage",
     handleID: nil,
-    attachmentsCount: 0
+    attachmentsCount: 0,
   )
   let streamProvider:
     (
       MessageWatcher,
       Int64?,
       Int64?,
-      MessageWatcherConfiguration
+      MessageWatcherConfiguration,
     ) -> AsyncThrowingStream<Message, Error> = { _, _, _, _ in
       AsyncThrowingStream { continuation in
         continuation.yield(message)
@@ -463,7 +398,7 @@ func watchCommandFlushesPlainOutput() async throws {
       values: values,
       runtime: runtime,
       storeFactory: { _ in store },
-      streamProvider: streamProvider
+      streamProvider: streamProvider,
     )
   }
   #expect(output.contains("hello"))
@@ -474,7 +409,7 @@ func watchCommandFlushesJsonOutput() async throws {
   let values = ParsedValues(
     positional: [],
     options: ["db": ["/tmp/unused"], "debounce": ["1ms"]],
-    flags: ["jsonOutput"]
+    flags: ["jsonOutput"],
   )
   let runtime = RuntimeOptions(parsedValues: values)
   let db = try Connection(.inMemory)
@@ -489,10 +424,11 @@ func watchCommandFlushesJsonOutput() async throws {
       total_bytes INTEGER,
       is_sticker INTEGER
     );
-    """
+    """,
   )
   try db.execute(
-    "CREATE TABLE message_attachment_join (message_id INTEGER, attachment_id INTEGER);")
+    "CREATE TABLE message_attachment_join (message_id INTEGER, attachment_id INTEGER);",
+  )
   try db.execute(
     """
     CREATE TABLE message (
@@ -503,14 +439,14 @@ func watchCommandFlushesJsonOutput() async throws {
       is_from_me INTEGER,
       service TEXT
     );
-    """
+    """,
   )
 
   let store = try MessageStore(
     connection: db,
     path: ":memory:",
     hasAttributedBody: false,
-    hasReactionColumns: false
+    hasReactionColumns: false,
   )
   let message = Message(
     rowID: 1,
@@ -521,14 +457,14 @@ func watchCommandFlushesJsonOutput() async throws {
     isFromMe: false,
     service: "iMessage",
     handleID: nil,
-    attachmentsCount: 0
+    attachmentsCount: 0,
   )
   let streamProvider:
     (
       MessageWatcher,
       Int64?,
       Int64?,
-      MessageWatcherConfiguration
+      MessageWatcherConfiguration,
     ) -> AsyncThrowingStream<Message, Error> = { _, _, _, _ in
       AsyncThrowingStream { continuation in
         continuation.yield(message)
@@ -541,7 +477,7 @@ func watchCommandFlushesJsonOutput() async throws {
       values: values,
       runtime: runtime,
       storeFactory: { _ in store },
-      streamProvider: streamProvider
+      streamProvider: streamProvider,
     )
   }
   #expect(output.contains("\"text\":\"hello\""))

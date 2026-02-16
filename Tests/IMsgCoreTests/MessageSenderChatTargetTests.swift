@@ -40,7 +40,7 @@ private final class TestMessageSender {
   private func resolveChatTarget(_ options: inout MessageSendOptions) -> String {
     let guid = options.chatGUID.trimmingCharacters(in: .whitespacesAndNewlines)
     let identifier = options.chatIdentifier.trimmingCharacters(in: .whitespacesAndNewlines)
-    if !identifier.isEmpty && looksLikeHandle(identifier) {
+    if !identifier.isEmpty, looksLikeHandle(identifier) {
       if options.recipient.isEmpty {
         options.recipient = identifier
       }
@@ -78,7 +78,7 @@ func messageSenderPrefersHandleWhenChatIdentifierLooksLikeHandle() throws {
     service: .auto,
     region: "US",
     chatIdentifier: "imessage:+15551234567",
-    chatGUID: "iMessage;+;chat123"
+    chatGUID: "iMessage;+;chat123",
   )
   let captured = try sender.send(options)
 
@@ -97,7 +97,7 @@ func messageSenderUsesChatGuidWhenIdentifierIsGroupHandle() throws {
     service: .auto,
     region: "US",
     chatIdentifier: "iMessage;+;group123",
-    chatGUID: "iMessage;+;group123"
+    chatGUID: "iMessage;+;group123",
   )
   let captured = try sender.send(options)
 

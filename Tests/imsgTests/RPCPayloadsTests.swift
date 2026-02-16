@@ -21,7 +21,7 @@ func chatPayloadIncludesParticipantsAndGroupFlag() {
     name: "Group",
     service: "iMessage",
     lastMessageAt: date,
-    participants: ["+111", "+222"]
+    participants: ["+111", "+222"],
   )
   #expect(payload["id"] as? Int64 == 1)
   #expect(payload["identifier"] as? String == "iMessage;+;chat123")
@@ -43,14 +43,14 @@ func messagePayloadIncludesChatFields() {
     attachmentsCount: 1,
     guid: "msg-guid-5",
     replyToGUID: "msg-guid-1",
-    threadOriginatorGUID: "thread-guid-5"
+    threadOriginatorGUID: "thread-guid-5",
   )
   let chatInfo = ChatInfo(
     id: 10,
     identifier: "iMessage;+;chat123",
     guid: "iMessage;+;chat123",
     name: "Group",
-    service: "iMessage"
+    service: "iMessage",
   )
   let attachment = AttachmentMeta(
     filename: "file.dat",
@@ -60,7 +60,7 @@ func messagePayloadIncludesChatFields() {
     totalBytes: 12,
     isSticker: false,
     originalPath: "/tmp/file.dat",
-    missing: false
+    missing: false,
   )
   let reaction = Reaction(
     rowID: 99,
@@ -68,14 +68,14 @@ func messagePayloadIncludesChatFields() {
     sender: "+123",
     isFromMe: false,
     date: Date(timeIntervalSince1970: 2),
-    associatedMessageID: 5
+    associatedMessageID: 5,
   )
   let payload = messagePayload(
     message: message,
     chatInfo: chatInfo,
     participants: ["+111"],
     attachments: [attachment],
-    reactions: [reaction]
+    reactions: [reaction],
   )
   #expect(payload["chat_id"] as? Int64 == 10)
   #expect(payload["guid"] as? String == "msg-guid-5")
@@ -87,7 +87,8 @@ func messagePayloadIncludesChatFields() {
   #expect((payload["attachments"] as? [[String: Any]])?.count == 1)
   #expect(
     (payload["reactions"] as? [[String: Any]])?.first?["emoji"] as? String
-      == ReactionType.like.emoji)
+      == ReactionType.like.emoji,
+  )
 }
 
 @Test
@@ -103,18 +104,50 @@ func messagePayloadOmitsEmptyReplyToGuid() {
     handleID: nil,
     attachmentsCount: 0,
     guid: "msg-guid-6",
-    replyToGUID: nil
+    replyToGUID: nil,
   )
   let payload = messagePayload(
     message: message,
     chatInfo: nil,
     participants: [],
     attachments: [],
-    reactions: []
+    reactions: [],
   )
   #expect(payload["reply_to_guid"] == nil)
   #expect(payload["thread_originator_guid"] == nil)
   #expect(payload["guid"] as? String == "msg-guid-6")
+}
+
+@Test
+func messagePayloadIncludesReactionEventMetadata() {
+  let message = Message(
+    rowID: 7,
+    chatID: 10,
+    sender: "+123",
+    text: "Liked \"hello\"",
+    date: Date(timeIntervalSince1970: 1),
+    isFromMe: false,
+    service: "iMessage",
+    handleID: nil,
+    attachmentsCount: 0,
+    guid: "msg-guid-7",
+    isReaction: true,
+    reactionType: .like,
+    isReactionAdd: true,
+    reactedToGUID: "msg-guid-5",
+  )
+  let payload = messagePayload(
+    message: message,
+    chatInfo: nil,
+    participants: [],
+    attachments: [],
+    reactions: [],
+  )
+  #expect(payload["is_reaction"] as? Bool == true)
+  #expect(payload["reaction_type"] as? String == "like")
+  #expect(payload["reaction_emoji"] as? String == "👍")
+  #expect(payload["is_reaction_add"] as? Bool == true)
+  #expect(payload["reacted_to_guid"] as? String == "msg-guid-5")
 }
 
 @Test

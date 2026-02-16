@@ -31,66 +31,66 @@ public enum ReactionType: Sendable, Equatable, Hashable {
 
   /// Returns the reaction type for a removal (values 3000-3006)
   public static func fromRemoval(_ value: Int, customEmoji: String? = nil) -> ReactionType? {
-    return ReactionType(rawValue: value - 1000, customEmoji: customEmoji)
+    ReactionType(rawValue: value - 1000, customEmoji: customEmoji)
   }
 
   /// Whether this associated_message_type represents adding a reaction (2000-2006)
   public static func isReactionAdd(_ value: Int) -> Bool {
-    return value >= 2000 && value <= 2006
+    value >= 2000 && value <= 2006
   }
 
   /// Whether this associated_message_type represents removing a reaction (3000-3006)
   public static func isReactionRemove(_ value: Int) -> Bool {
-    return value >= 3000 && value <= 3006
+    value >= 3000 && value <= 3006
   }
 
   /// Whether this associated_message_type represents any reaction add/remove
   public static func isReaction(_ value: Int) -> Bool {
-    return isReactionAdd(value) || isReactionRemove(value)
+    isReactionAdd(value) || isReactionRemove(value)
   }
 
   /// Human-readable name for the reaction
   public var name: String {
     switch self {
-    case .love: return "love"
-    case .like: return "like"
-    case .dislike: return "dislike"
-    case .laugh: return "laugh"
-    case .emphasis: return "emphasis"
-    case .question: return "question"
-    case .custom: return "custom"
+    case .love: "love"
+    case .like: "like"
+    case .dislike: "dislike"
+    case .laugh: "laugh"
+    case .emphasis: "emphasis"
+    case .question: "question"
+    case .custom: "custom"
     }
   }
 
   /// Emoji representation of the reaction
   public var emoji: String {
     switch self {
-    case .love: return "❤️"
-    case .like: return "👍"
-    case .dislike: return "👎"
-    case .laugh: return "😂"
-    case .emphasis: return "‼️"
-    case .question: return "❓"
-    case .custom(let emoji): return emoji
+    case .love: "❤️"
+    case .like: "👍"
+    case .dislike: "👎"
+    case .laugh: "😂"
+    case .emphasis: "‼️"
+    case .question: "❓"
+    case .custom(let emoji): emoji
     }
   }
 
   /// Associated message type for adding this reaction (2000-2006).
   public var associatedMessageType: Int {
     switch self {
-    case .love: return 2000
-    case .like: return 2001
-    case .dislike: return 2002
-    case .laugh: return 2003
-    case .emphasis: return 2004
-    case .question: return 2005
-    case .custom: return 2006
+    case .love: 2000
+    case .like: 2001
+    case .dislike: 2002
+    case .laugh: 2003
+    case .emphasis: 2004
+    case .question: 2005
+    case .custom: 2006
     }
   }
 
   /// Associated message type for removing this reaction (3000-3006).
   public var removalAssociatedMessageType: Int {
-    return associatedMessageType + 1000
+    associatedMessageType + 1000
   }
 
   public var isCustom: Bool {
@@ -173,7 +173,7 @@ public struct Reaction: Sendable, Equatable {
     sender: String,
     isFromMe: Bool,
     date: Date,
-    associatedMessageID: Int64
+    associatedMessageID: Int64,
   ) {
     self.rowID = rowID
     self.reactionType = reactionType
@@ -229,8 +229,8 @@ public struct Message: Sendable, Equatable {
   public let service: String
   public let handleID: Int64?
   public let attachmentsCount: Int
-  
-  // Reaction metadata (populated when message is a reaction event)
+
+  /// Reaction metadata (populated when message is a reaction event)
   /// Whether this message is a reaction event (tapback add/remove)
   public let isReaction: Bool
   /// The type of reaction (only set when isReaction is true)
@@ -256,7 +256,7 @@ public struct Message: Sendable, Equatable {
     isReaction: Bool = false,
     reactionType: ReactionType? = nil,
     isReactionAdd: Bool? = nil,
-    reactedToGUID: String? = nil
+    reactedToGUID: String? = nil,
   ) {
     self.rowID = rowID
     self.chatID = chatID
@@ -295,7 +295,7 @@ public struct AttachmentMeta: Sendable, Equatable {
     totalBytes: Int64,
     isSticker: Bool,
     originalPath: String,
-    missing: Bool
+    missing: Bool,
   ) {
     self.filename = filename
     self.transferName = transferName

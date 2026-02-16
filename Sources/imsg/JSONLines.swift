@@ -7,12 +7,12 @@ enum JSONLines {
     return encoder
   }()
 
-  static func encode<T: Encodable>(_ value: T) throws -> String {
+  static func encode(_ value: some Encodable) throws -> String {
     let data = try encoder.encode(value)
     return String(data: data, encoding: .utf8) ?? ""
   }
 
-  static func print<T: Encodable>(_ value: T) throws {
+  static func print(_ value: some Encodable) throws {
     let line = try encode(value)
     if !line.isEmpty {
       StdoutWriter.writeLine(line)

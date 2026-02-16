@@ -1,0 +1,11 @@
+--indent 2
+--disable indent
+--disable sortImports
+--disable blankLinesBetweenImports
+--disable trailingCommas
+--disable extensionAccessControl
+--disable redundantFileprivate
+--disable spaceAroundOperators
+--disable hoistPatternLet
+--disable redundantReturn
+--disable braces

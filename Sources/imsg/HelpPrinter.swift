@@ -1,7 +1,7 @@
 import Commander
 import Foundation
 
-struct HelpPrinter {
+enum HelpPrinter {
   static func printRoot(version: String, rootName: String, commands: [CommandSpec]) {
     for line in renderRoot(version: version, rootName: rootName, commands: commands) {
       StdoutWriter.writeLine(line)
