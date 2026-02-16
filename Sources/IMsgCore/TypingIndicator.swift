@@ -27,9 +27,13 @@ public struct TypingIndicator: Sendable {
   ///   - chatIdentifier: The chat identifier string.
   ///   - duration: Seconds to show the typing indicator.
   public static func typeForDuration(chatIdentifier: String, duration: TimeInterval) async throws {
-    try startTyping(chatIdentifier: chatIdentifier)
-    try await Task.sleep(nanoseconds: UInt64(duration * 1_000_000_000))
-    try stopTyping(chatIdentifier: chatIdentifier)
+    try await typeForDuration(
+      chatIdentifier: chatIdentifier,
+      duration: duration,
+      startTyping: { try startTyping(chatIdentifier: $0) },
+      stopTyping: { try stopTyping(chatIdentifier: $0) },
+      sleep: { try await Task.sleep(nanoseconds: $0) }
+    )
   }
 
   // MARK: - Private
@@ -56,6 +60,25 @@ public struct TypingIndicator: Sendable {
     typealias SetTypingFunc = @convention(c) (AnyObject, Selector, Bool) -> Void
     let setTypingFunc = unsafeBitCast(implementation, to: SetTypingFunc.self)
     setTypingFunc(chat, selector, isTyping)
+  }
+
+  static func typeForDuration(
+    chatIdentifier: String,
+    duration: TimeInterval,
+    startTyping: (String) throws -> Void,
+    stopTyping: (String) throws -> Void,
+    sleep: (UInt64) async throws -> Void
+  ) async throws {
+    try startTyping(chatIdentifier)
+    var stopped = false
+    defer {
+      if !stopped {
+        try? stopTyping(chatIdentifier)
+      }
+    }
+    try await sleep(UInt64(duration * 1_000_000_000))
+    try stopTyping(chatIdentifier)
+    stopped = true
   }
 
   private static func ensureDaemonConnection(handle: UnsafeMutableRawPointer) throws {

@@ -320,6 +320,77 @@ func rpcSendRejectsUnknownChatID() async throws {
 }
 
 @Test
+func rpcTypingStartResolvesSMSRecipient() async throws {
+  let store = try RPCTestDatabase.makeStore()
+  let output = TestRPCOutput()
+  var startedIdentifier: String?
+  let server = RPCServer(
+    store: store,
+    verbose: false,
+    output: output,
+    startTyping: { identifier in startedIdentifier = identifier },
+    stopTyping: { _ in }
+  )
+
+  let line =
+    #"{"jsonrpc":"2.0","id":20,"method":"typing.start","params":{"to":"+15551234567","service":"sms"}}"#
+  await server.handleLineForTesting(line)
+
+  #expect(startedIdentifier == "SMS;-;+15551234567")
+  let result = output.responses.first?["result"] as? [String: Any]
+  #expect(result?["ok"] as? Bool == true)
+}
+
+@Test
+func rpcTypingStopResolvesChatID() async throws {
+  let store = try RPCTestDatabase.makeStore()
+  let output = TestRPCOutput()
+  var stoppedIdentifier: String?
+  let server = RPCServer(
+    store: store,
+    verbose: false,
+    output: output,
+    startTyping: { _ in },
+    stopTyping: { identifier in stoppedIdentifier = identifier }
+  )
+
+  let line = #"{"jsonrpc":"2.0","id":21,"method":"typing.stop","params":{"chat_id":1}}"#
+  await server.handleLineForTesting(line)
+
+  #expect(stoppedIdentifier == "iMessage;+;chat123")
+  let result = output.responses.first?["result"] as? [String: Any]
+  #expect(result?["ok"] as? Bool == true)
+}
+
+@Test
+func rpcTypingRejectsInvalidService() async throws {
+  let store = try RPCTestDatabase.makeStore()
+  let output = TestRPCOutput()
+  let server = RPCServer(store: store, verbose: false, output: output)
+
+  let line =
+    #"{"jsonrpc":"2.0","id":22,"method":"typing.start","params":{"to":"+15551234567","service":"fax"}}"#
+  await server.handleLineForTesting(line)
+
+  let error = output.errors.first?["error"] as? [String: Any]
+  #expect(int64Value(error?["code"]) == -32602)
+}
+
+@Test
+func rpcTypingRejectsChatAndRecipient() async throws {
+  let store = try RPCTestDatabase.makeStore()
+  let output = TestRPCOutput()
+  let server = RPCServer(store: store, verbose: false, output: output)
+
+  let line =
+    #"{"jsonrpc":"2.0","id":23,"method":"typing.start","params":{"chat_id":1,"to":"+15551234567"}}"#
+  await server.handleLineForTesting(line)
+
+  let error = output.errors.first?["error"] as? [String: Any]
+  #expect(int64Value(error?["code"]) == -32602)
+}
+
+@Test
 func rpcWatchSubscribeEmitsNotificationAndUnsubscribe() async throws {
   let store = try RPCTestDatabase.makeStore()
   let output = TestRPCOutput()

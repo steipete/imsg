@@ -41,7 +41,12 @@ enum TypingCommand {
   static func run(
     values: ParsedValues,
     runtime: RuntimeOptions,
-    storeFactory: @escaping (String) throws -> MessageStore = { try MessageStore(path: $0) }
+    storeFactory: @escaping (String) throws -> MessageStore = { try MessageStore(path: $0) },
+    startTyping: @escaping (String) throws -> Void = { try TypingIndicator.startTyping(chatIdentifier: $0) },
+    stopTyping: @escaping (String) throws -> Void = { try TypingIndicator.stopTyping(chatIdentifier: $0) },
+    typeForDuration: @escaping (String, TimeInterval) async throws -> Void = {
+      try await TypingIndicator.typeForDuration(chatIdentifier: $0, duration: $1)
+    }
   ) async throws {
     let dbPath = values.option("db") ?? MessageStore.defaultPath
     let recipient = values.option("to") ?? ""
@@ -49,9 +54,13 @@ enum TypingCommand {
     let chatIdentifier = values.option("chatIdentifier") ?? ""
     let chatGUID = values.option("chatGUID") ?? ""
     let hasChatTarget = chatID != nil || !chatIdentifier.isEmpty || !chatGUID.isEmpty
-    let stopFlag = values.option("stop") == "true"
+    let stopFlag = try parseStopFlag(values.option("stop"))
     let durationRaw = values.option("duration") ?? ""
+    let serviceRaw = values.option("service") ?? "imessage"
 
+    if hasChatTarget && !recipient.isEmpty {
+      throw ParsedValuesError.invalidOption("to")
+    }
     if !hasChatTarget && recipient.isEmpty {
       throw ParsedValuesError.missingOption("to")
     }
@@ -62,12 +71,12 @@ enum TypingCommand {
       chatID: chatID,
       chatIdentifier: chatIdentifier,
       chatGUID: chatGUID,
-      service: values.option("service") ?? "imessage",
+      service: serviceRaw,
       storeFactory: storeFactory
     )
 
     if stopFlag {
-      try TypingIndicator.stopTyping(chatIdentifier: resolvedIdentifier)
+      try stopTyping(resolvedIdentifier)
       if runtime.jsonOutput {
         try JSONLines.print(["status": "stopped"])
       } else {
@@ -78,8 +87,7 @@ enum TypingCommand {
 
     if !durationRaw.isEmpty {
       let seconds = try parseDurationToSeconds(durationRaw)
-      try await TypingIndicator.typeForDuration(
-        chatIdentifier: resolvedIdentifier, duration: seconds)
+      try await typeForDuration(resolvedIdentifier, seconds)
       if runtime.jsonOutput {
         try JSONLines.print(["status": "completed", "duration_s": "\(seconds)"])
       } else {
@@ -88,7 +96,7 @@ enum TypingCommand {
       return
     }
 
-    try TypingIndicator.startTyping(chatIdentifier: resolvedIdentifier)
+    try startTyping(resolvedIdentifier)
     if runtime.jsonOutput {
       try JSONLines.print(["status": "started"])
     } else {
@@ -115,29 +123,25 @@ enum TypingCommand {
       if !info.guid.isEmpty { return info.guid }
       return info.identifier
     }
-    let svc = service == "sms" ? "SMS" : "iMessage"
+    guard let messageService = MessageService(rawValue: service.lowercased()) else {
+      throw IMsgError.invalidService(service)
+    }
+    let svc = messageService == .sms ? "SMS" : "iMessage"
     return "\(svc);-;\(recipient)"
   }
 
+  private static func parseStopFlag(_ raw: String?) throws -> Bool {
+    guard let raw else { return false }
+    if raw == "true" { return true }
+    if raw == "false" { return false }
+    throw ParsedValuesError.invalidOption("stop")
+  }
+
   private static func parseDurationToSeconds(_ raw: String) throws -> TimeInterval {
-    let trimmed = raw.trimmingCharacters(in: .whitespaces).lowercased()
-    if trimmed.hasSuffix("ms") {
-      let numStr = String(trimmed.dropLast(2))
-      guard let ms = Double(numStr), ms > 0 else {
-        throw IMsgError.typingIndicatorFailed("Invalid duration: \(raw)")
-      }
-      return ms / 1000.0
+    guard let seconds = DurationParser.parse(raw), seconds > 0 else {
+      throw IMsgError.typingIndicatorFailed(
+        "Invalid duration: \(raw). Use e.g. 5s, 3000ms, 1m, or 1h")
     }
-    if trimmed.hasSuffix("s") {
-      let numStr = String(trimmed.dropLast(1))
-      guard let s = Double(numStr), s > 0 else {
-        throw IMsgError.typingIndicatorFailed("Invalid duration: \(raw)")
-      }
-      return s
-    }
-    guard let s = Double(trimmed), s > 0 else {
-      throw IMsgError.typingIndicatorFailed("Invalid duration: \(raw). Use e.g. 5s or 3000ms")
-    }
-    return s
+    return seconds
   }
 }
