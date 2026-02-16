@@ -115,6 +115,29 @@ public struct TypingIndicator: Sendable {
     if controller.responds(to: connectSel) {
       _ = controller.perform(connectSel)
     }
+
+    // Wait for daemon connection to establish and chat registry to populate
+    try waitForDaemonConnection(controller)
+  }
+
+  private static func waitForDaemonConnection(_ controller: AnyObject) throws {
+    let maxAttempts = 50  // 50 attempts × 100ms = 5 seconds max
+    let sleepInterval: UInt32 = 100_000  // 100ms in microseconds
+
+    for attempt in 0..<maxAttempts {
+      if hasLiveDaemonConnection(controller) {
+        // Connection established; give registry a moment to populate
+        if attempt > 0 {
+          usleep(sleepInterval)
+        }
+        return
+      }
+      usleep(sleepInterval)
+    }
+
+    throw IMsgError.typingIndicatorFailed(
+      "Failed to establish daemon connection after 5 seconds. "
+        + "Make sure Messages.app is running and signed in.")
   }
 
   private static func hasLiveDaemonConnection(_ controller: AnyObject) -> Bool {
@@ -144,6 +167,23 @@ public struct TypingIndicator: Sendable {
       throw IMsgError.typingIndicatorFailed("Failed to get IMChatRegistry shared instance")
     }
 
+    // Poll for the chat to appear in the registry (registry may be syncing after daemon connection)
+    let maxAttempts = 30  // 30 attempts × 100ms = 3 seconds max
+    let sleepInterval: UInt32 = 100_000  // 100ms in microseconds
+
+    for _ in 0..<maxAttempts {
+      if let chat = tryFindChat(in: registry, identifier: identifier) {
+        return chat
+      }
+      usleep(sleepInterval)
+    }
+
+    throw IMsgError.typingIndicatorFailed(
+      "Chat not found for identifier: \(identifier). "
+        + "Make sure Messages.app has an active conversation with this contact.")
+  }
+
+  private static func tryFindChat(in registry: NSObject, identifier: String) -> NSObject? {
     let guidSel = sel_registerName("existingChatWithGUID:")
     if registry.responds(to: guidSel) {
       if let chat = registry.perform(guidSel, with: identifier)?.takeUnretainedValue() as? NSObject
@@ -160,9 +200,7 @@ public struct TypingIndicator: Sendable {
       }
     }
 
-    throw IMsgError.typingIndicatorFailed(
-      "Chat not found for identifier: \(identifier). "
-        + "Make sure Messages.app has an active conversation with this contact.")
+    return nil
   }
 }
 
