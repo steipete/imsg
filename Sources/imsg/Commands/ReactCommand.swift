@@ -13,7 +13,6 @@ enum ReactCommand {
       - Only reacts to the MOST RECENT incoming message in the conversation
       - Requires Messages.app to be running
       - Uses UI automation (System Events) which requires accessibility permissions
-      - The chat must be open in Messages.app for reliable operation
       
       Reaction types:
         love (❤️), like (👍), dislike (👎), laugh (😂), emphasis (‼️), question (❓)
@@ -40,7 +39,11 @@ enum ReactCommand {
 
   static func run(
     values: ParsedValues,
-    runtime: RuntimeOptions
+    runtime: RuntimeOptions,
+    storeFactory: @escaping (String) throws -> MessageStore = { try MessageStore(path: $0) },
+    appleScriptRunner: @escaping (String, [String]) throws -> Void = { source, arguments in
+      try runAppleScript(source, arguments: arguments)
+    }
   ) async throws {
     guard let chatID = values.optionInt64("chatID") else {
       throw ParsedValuesError.missingOption("chat-id")
@@ -51,17 +54,27 @@ enum ReactCommand {
     guard let reactionType = ReactionType.parse(reactionString) else {
       throw IMsgError.invalidReaction(reactionString)
     }
-    
+    if case let .custom(emoji) = reactionType, !isSingleEmoji(emoji) {
+      throw IMsgError.invalidReaction(reactionString)
+    }
+
     // Get chat info for the GUID
     let dbPath = values.option("db") ?? MessageStore.defaultPath
-    let store = try MessageStore(path: dbPath)
+    let store = try storeFactory(dbPath)
     guard let chatInfo = try store.chatInfo(chatID: chatID) else {
       throw IMsgError.chatNotFound(chatID: chatID)
     }
-    
+
+    let chatLookup = preferredChatLookup(chatInfo: chatInfo)
+
     // Send the reaction via AppleScript + System Events
-    try sendReaction(reactionType: reactionType, chatGUID: chatInfo.guid)
-    
+    try sendReaction(
+      reactionType: reactionType,
+      chatGUID: chatInfo.guid,
+      chatLookup: chatLookup,
+      appleScriptRunner: appleScriptRunner
+    )
+
     if runtime.jsonOutput {
       let result = ReactResult(
         success: true,
@@ -74,16 +87,14 @@ enum ReactCommand {
       print("Sent \(reactionType.emoji) reaction to chat \(chatID)")
     }
   }
-  
-  private static func sendReaction(reactionType: ReactionType, chatGUID: String) throws {
-    // Use AppleScript with System Events to:
-    // 1. Activate Messages app
-    // 2. Open the specific chat
-    // 3. Use Cmd+T to open tapback menu on most recent message
-    // 4. Press the appropriate number key (1-6) for standard reactions
-    //    or type the emoji for custom reactions
-    
-    let keyNumber: Int?
+
+  private static func sendReaction(
+    reactionType: ReactionType,
+    chatGUID: String,
+    chatLookup: String,
+    appleScriptRunner: @escaping (String, [String]) throws -> Void
+  ) throws {
+    let keyNumber: Int
     switch reactionType {
     case .love: keyNumber = 1
     case .like: keyNumber = 2
@@ -91,70 +102,110 @@ enum ReactCommand {
     case .laugh: keyNumber = 4
     case .emphasis: keyNumber = 5
     case .question: keyNumber = 6
-    case .custom: keyNumber = nil
+    case .custom:
+      let script = """
+        on run argv
+          set chatGUID to item 1 of argv
+          set chatLookup to item 2 of argv
+          set customEmoji to item 3 of argv
+
+          tell application "Messages"
+            activate
+            set targetChat to chat id chatGUID
+          end tell
+
+          delay 0.3
+
+          tell application "System Events"
+            tell process "Messages"
+              keystroke "f" using command down
+              delay 0.15
+              keystroke "a" using command down
+              keystroke chatLookup
+              delay 0.25
+              key code 36
+              delay 0.35
+              keystroke "t" using command down
+              delay 0.2
+              keystroke customEmoji
+              delay 0.1
+              key code 36
+            end tell
+          end tell
+        end run
+        """
+      try appleScriptRunner(script, [chatGUID, chatLookup, reactionType.emoji])
+      return
     }
-    
-    let script: String
-    if let keyNumber = keyNumber {
-      // Standard tapback: Cmd+T then number key
-      script = """
+
+    let script = """
+      on run argv
+        set chatGUID to item 1 of argv
+        set chatLookup to item 2 of argv
+        set reactionKey to item 3 of argv
+
         tell application "Messages"
           activate
-          set targetChat to chat id "\(chatGUID)"
+          set targetChat to chat id chatGUID
         end tell
-        
+
         delay 0.3
-        
+
         tell application "System Events"
           tell process "Messages"
-            -- Open tapback menu with Cmd+T
+            keystroke "f" using command down
+            delay 0.15
+            keystroke "a" using command down
+            keystroke chatLookup
+            delay 0.25
+            key code 36
+            delay 0.35
             keystroke "t" using command down
             delay 0.2
-            -- Select reaction with number key
-            keystroke "\(keyNumber)"
+            keystroke reactionKey
           end tell
         end tell
-        """
-    } else {
-      // Custom emoji reaction: Cmd+T, then type the emoji, then Enter
-      let emoji = reactionType.emoji
-      script = """
-        tell application "Messages"
-          activate
-          set targetChat to chat id "\(chatGUID)"
-        end tell
-        
-        delay 0.3
-        
-        tell application "System Events"
-          tell process "Messages"
-            -- Open tapback menu with Cmd+T
-            keystroke "t" using command down
-            delay 0.2
-            -- Type the emoji
-            keystroke "\(emoji)"
-            delay 0.1
-            -- Press Enter to confirm
-            keystroke return
-          end tell
-        end tell
-        """
-    }
-    
-    try runAppleScript(script)
+      end run
+      """
+    try appleScriptRunner(script, [chatGUID, chatLookup, "\(keyNumber)"])
   }
-  
-  private static func runAppleScript(_ source: String) throws {
+
+  private static func preferredChatLookup(chatInfo: ChatInfo) -> String {
+    let preferred = chatInfo.name.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !preferred.isEmpty {
+      return preferred
+    }
+    let identifier = chatInfo.identifier.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !identifier.isEmpty {
+      return identifier
+    }
+    return chatInfo.guid
+  }
+
+  private static func isSingleEmoji(_ value: String) -> Bool {
+    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard trimmed.count == 1 else { return false }
+    guard let scalar = trimmed.unicodeScalars.first else { return false }
+    return scalar.properties.isEmoji || scalar.properties.isEmojiPresentation
+  }
+
+  private static func runAppleScript(_ source: String, arguments: [String]) throws {
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-    process.arguments = ["-e", source]
-    
+    process.arguments = ["-l", "AppleScript", "-"] + arguments
+
+    let stdinPipe = Pipe()
     let stderrPipe = Pipe()
+    process.standardInput = stdinPipe
     process.standardError = stderrPipe
-    
+
     try process.run()
+    if let data = source.data(using: .utf8) {
+      stdinPipe.fileHandleForWriting.write(data)
+    }
+    stdinPipe.fileHandleForWriting.closeFile()
     process.waitUntilExit()
-    
+
     if process.terminationStatus != 0 {
       let data = stderrPipe.fileHandleForReading.readDataToEndOfFile()
       let message = String(data: data, encoding: .utf8) ?? "Unknown AppleScript error"
