@@ -546,3 +546,111 @@ func watchCommandFlushesJsonOutput() async throws {
   }
   #expect(output.contains("\"text\":\"hello\""))
 }
+
+// MARK: - Completions Command Tests
+
+@Test
+func completionsCommandGeneratesBash() throws {
+  try CompletionsCommand.run(shell: "bash")
+}
+
+@Test
+func completionsCommandGeneratesZsh() throws {
+  try CompletionsCommand.run(shell: "zsh")
+}
+
+@Test
+func completionsCommandGeneratesFish() throws {
+  try CompletionsCommand.run(shell: "fish")
+}
+
+@Test
+func completionsCommandGeneratesLLM() throws {
+  try CompletionsCommand.run(shell: "llm")
+}
+
+@Test
+func completionsCommandRejectsMissingShell() {
+  do {
+    try CompletionsCommand.run(shell: nil)
+    #expect(Bool(false))
+  } catch let error as CompletionsError {
+    #expect(error.description.contains("Missing shell"))
+  } catch {
+    #expect(Bool(false))
+  }
+}
+
+@Test
+func completionsCommandRejectsUnknownShell() {
+  do {
+    try CompletionsCommand.run(shell: "powershell")
+    #expect(Bool(false))
+  } catch let error as CompletionsError {
+    #expect(error.description.contains("Unknown shell"))
+  } catch {
+    #expect(Bool(false))
+  }
+}
+
+@Test
+func completionMetadataContainsAllCommands() {
+  // Verify CompletionMetadata stays in sync with registered commands
+  let router = CommandRouter()
+  let registeredNames = Set(router.specs.map { $0.name })
+  let metadataNames = Set(CompletionMetadata.commands.map { $0.name })
+
+  // Every registered command should be in metadata
+  for name in registeredNames {
+    #expect(metadataNames.contains(name), "Command '\(name)' missing from CompletionMetadata")
+  }
+
+  // Every metadata command should be registered (catches stale entries)
+  for name in metadataNames {
+    #expect(registeredNames.contains(name), "Command '\(name)' in metadata but not registered")
+  }
+}
+
+@Test
+func completionMetadataServiceChoicesMatchEnum() {
+  // Verify serviceChoices derives from MessageService enum
+  let expected = Set(MessageService.allCases.map { $0.rawValue })
+  let actual = Set(CompletionMetadata.serviceChoices)
+  #expect(expected == actual, "serviceChoices doesn't match MessageService.allCases")
+}
+
+@Test
+func bashCompletionContainsAllCommands() throws {
+  let output = try CompletionsCommand.generateOutput(shell: "bash")
+  for cmd in CompletionMetadata.commands {
+    #expect(output.contains(cmd.name), "Bash completion missing command: \(cmd.name)")
+  }
+  #expect(output.contains("complete -F _imsg imsg"))
+}
+
+@Test
+func zshCompletionContainsAllCommands() throws {
+  let output = try CompletionsCommand.generateOutput(shell: "zsh")
+  for cmd in CompletionMetadata.commands {
+    #expect(output.contains(cmd.name), "Zsh completion missing command: \(cmd.name)")
+  }
+  #expect(output.contains("#compdef imsg"))
+}
+
+@Test
+func fishCompletionContainsAllCommands() throws {
+  let output = try CompletionsCommand.generateOutput(shell: "fish")
+  for cmd in CompletionMetadata.commands {
+    #expect(output.contains(cmd.name), "Fish completion missing command: \(cmd.name)")
+  }
+  #expect(output.contains("complete -c imsg"))
+}
+
+@Test
+func llmCompletionContainsAllCommands() throws {
+  let output = try CompletionsCommand.generateOutput(shell: "llm")
+  for cmd in CompletionMetadata.commands {
+    #expect(output.contains("### \(cmd.name)"), "LLM context missing command: \(cmd.name)")
+  }
+  #expect(output.contains("# imsg CLI Reference"))
+}
