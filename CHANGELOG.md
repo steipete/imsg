@@ -11,6 +11,7 @@
 - feat: include `thread_originator_guid` in message output (#39, thanks @ruthmade)
 - feat: expose `destination_caller_id` in message output (#29, thanks @commander-alexander)
 - fix: detect groups from `;+;` prefix in guid/identifier for RPC payloads (#42, thanks @shivshil)
+- feat: add typing indicator command + RPC methods with stricter validation (#41, thanks @kohoj)
 
 ## 0.4.0 - 2026-01-07
 - feat: surface audio message transcriptions (thanks @antons)
