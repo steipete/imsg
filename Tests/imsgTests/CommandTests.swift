@@ -327,3 +327,131 @@ func watchCommandRunsWithJsonOutput() async throws {
     streamProvider: streamProvider
   )
 }
+
+@Test
+func watchCommandFlushesPlainOutput() async throws {
+  let values = ParsedValues(
+    positional: [],
+    options: ["db": ["/tmp/unused"], "debounce": ["1ms"]],
+    flags: []
+  )
+  let runtime = RuntimeOptions(parsedValues: values)
+  let db = try Connection(.inMemory)
+  let store = try MessageStore(
+    connection: db,
+    path: ":memory:",
+    hasAttributedBody: false,
+    hasReactionColumns: false
+  )
+  let message = Message(
+    rowID: 1,
+    chatID: 1,
+    sender: "+123",
+    text: "hello",
+    date: Date(),
+    isFromMe: false,
+    service: "iMessage",
+    handleID: nil,
+    attachmentsCount: 0
+  )
+  let streamProvider:
+    (
+      MessageWatcher,
+      Int64?,
+      Int64?,
+      MessageWatcherConfiguration
+    ) -> AsyncThrowingStream<Message, Error> = { _, _, _, _ in
+      AsyncThrowingStream { continuation in
+        continuation.yield(message)
+        continuation.finish()
+      }
+    }
+
+  let (output, _) = try await StdoutCapture.capture {
+    try await WatchCommand.run(
+      values: values,
+      runtime: runtime,
+      storeFactory: { _ in store },
+      streamProvider: streamProvider
+    )
+  }
+  #expect(output.contains("hello"))
+}
+
+@Test
+func watchCommandFlushesJsonOutput() async throws {
+  let values = ParsedValues(
+    positional: [],
+    options: ["db": ["/tmp/unused"], "debounce": ["1ms"]],
+    flags: ["jsonOutput"]
+  )
+  let runtime = RuntimeOptions(parsedValues: values)
+  let db = try Connection(.inMemory)
+  try db.execute(
+    """
+    CREATE TABLE attachment (
+      ROWID INTEGER PRIMARY KEY,
+      filename TEXT,
+      transfer_name TEXT,
+      uti TEXT,
+      mime_type TEXT,
+      total_bytes INTEGER,
+      is_sticker INTEGER
+    );
+    """
+  )
+  try db.execute(
+    "CREATE TABLE message_attachment_join (message_id INTEGER, attachment_id INTEGER);")
+  try db.execute(
+    """
+    CREATE TABLE message (
+      ROWID INTEGER PRIMARY KEY,
+      handle_id INTEGER,
+      text TEXT,
+      date INTEGER,
+      is_from_me INTEGER,
+      service TEXT
+    );
+    """
+  )
+
+  let store = try MessageStore(
+    connection: db,
+    path: ":memory:",
+    hasAttributedBody: false,
+    hasReactionColumns: false
+  )
+  let message = Message(
+    rowID: 1,
+    chatID: 1,
+    sender: "+123",
+    text: "hello",
+    date: Date(),
+    isFromMe: false,
+    service: "iMessage",
+    handleID: nil,
+    attachmentsCount: 0
+  )
+  let streamProvider:
+    (
+      MessageWatcher,
+      Int64?,
+      Int64?,
+      MessageWatcherConfiguration
+    ) -> AsyncThrowingStream<Message, Error> = { _, _, _, _ in
+      AsyncThrowingStream { continuation in
+        continuation.yield(message)
+        continuation.finish()
+      }
+    }
+
+  let (output, _) = try await StdoutCapture.capture {
+    try await WatchCommand.run(
+      values: values,
+      runtime: runtime,
+      storeFactory: { _ in store },
+      streamProvider: streamProvider
+    )
+  }
+  #expect(output.contains("\"text\":\"hello\""))
+}

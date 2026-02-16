@@ -1,4 +1,5 @@
 import Commander
+import Darwin
 import Foundation
 import IMsgCore
 
@@ -90,6 +91,7 @@ enum WatchCommand {
           reactions: reactions
         )
         try JSONLines.print(payload)
+        fflush(stdout)
         continue
       }
       let direction = message.isFromMe ? "sent" : "recv"
@@ -110,6 +112,7 @@ enum WatchCommand {
           )
         }
       }
+      fflush(stdout)
     }
   }
 }
