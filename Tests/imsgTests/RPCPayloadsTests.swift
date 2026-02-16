@@ -7,7 +7,7 @@ import Testing
 @Test
 func isGroupHandleFlagsGroup() {
   #expect(isGroupHandle(identifier: "iMessage;+;chat123", guid: "") == true)
-  #expect(isGroupHandle(identifier: "", guid: "iMessage;-;chat999") == true)
+  #expect(isGroupHandle(identifier: "", guid: "iMessage;-;chat999") == false)
   #expect(isGroupHandle(identifier: "+1555", guid: "") == false)
 }
 
