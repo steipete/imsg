@@ -7,7 +7,9 @@ public struct MessageWatcherConfiguration: Sendable, Equatable {
   /// When true, reaction events (tapback add/remove) are included in the stream
   public var includeReactions: Bool
 
-  public init(debounceInterval: TimeInterval = 0.25, batchLimit: Int = 100, includeReactions: Bool = false) {
+  public init(
+    debounceInterval: TimeInterval = 0.25, batchLimit: Int = 100, includeReactions: Bool = false
+  ) {
     self.debounceInterval = debounceInterval
     self.batchLimit = batchLimit
     self.includeReactions = includeReactions

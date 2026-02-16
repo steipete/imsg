@@ -42,17 +42,17 @@ enum SendCommand {
     storeFactory: @escaping (String) throws -> MessageStore = { try MessageStore(path: $0) }
   ) async throws {
     let dbPath = values.option("db") ?? MessageStore.defaultPath
-    let recipient = values.option("to") ?? ""
-    let chatID = values.optionInt64("chatID")
-    let chatIdentifier = values.option("chatIdentifier") ?? ""
-    let chatGUID = values.option("chatGUID") ?? ""
-    let hasChatTarget = chatID != nil || !chatIdentifier.isEmpty || !chatGUID.isEmpty
-    if hasChatTarget && !recipient.isEmpty {
-      throw ParsedValuesError.invalidOption("to")
-    }
-    if !hasChatTarget && recipient.isEmpty {
-      throw ParsedValuesError.missingOption("to")
-    }
+    let input = ChatTargetInput(
+      recipient: values.option("to") ?? "",
+      chatID: values.optionInt64("chatID"),
+      chatIdentifier: values.option("chatIdentifier") ?? "",
+      chatGUID: values.option("chatGUID") ?? ""
+    )
+    try ChatTargetResolver.validateRecipientRequirements(
+      input: input,
+      mixedTargetError: ParsedValuesError.invalidOption("to"),
+      missingRecipientError: ParsedValuesError.missingOption("to")
+    )
 
     let text = values.option("text") ?? ""
     let file = values.option("file") ?? ""
@@ -65,29 +65,29 @@ enum SendCommand {
     }
     let region = values.option("region") ?? "US"
 
-    var resolvedChatIdentifier = chatIdentifier
-    var resolvedChatGUID = chatGUID
-    if let chatID {
-      let store = try storeFactory(dbPath)
-      guard let info = try store.chatInfo(chatID: chatID) else {
-        throw IMsgError.invalidChatTarget("Unknown chat id \(chatID)")
+    let resolvedTarget = try await ChatTargetResolver.resolveChatTarget(
+      input: input,
+      lookupChat: { chatID in
+        let store = try storeFactory(dbPath)
+        return try store.chatInfo(chatID: chatID)
+      },
+      unknownChatError: { chatID in
+        IMsgError.invalidChatTarget("Unknown chat id \(chatID)")
       }
-      resolvedChatIdentifier = info.identifier
-      resolvedChatGUID = info.guid
-    }
-    if hasChatTarget && resolvedChatIdentifier.isEmpty && resolvedChatGUID.isEmpty {
+    )
+    if input.hasChatTarget && resolvedTarget.preferredIdentifier == nil {
       throw IMsgError.invalidChatTarget("Missing chat identifier or guid")
     }
 
     try sendMessage(
       MessageSendOptions(
-        recipient: recipient,
+        recipient: input.recipient,
         text: text,
         attachmentPath: file,
         service: service,
         region: region,
-        chatIdentifier: resolvedChatIdentifier,
-        chatGUID: resolvedChatGUID
+        chatIdentifier: resolvedTarget.chatIdentifier,
+        chatGUID: resolvedTarget.chatGUID
       ))
 
     if runtime.jsonOutput {

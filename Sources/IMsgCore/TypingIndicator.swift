@@ -7,6 +7,7 @@ import Foundation
 ///
 /// Requires macOS 14+, Messages.app signed in, and an existing conversation with the contact.
 public struct TypingIndicator: Sendable {
+  private static let daemonConnectionTracker = DaemonConnectionTracker()
 
   /// Start showing the typing indicator for a chat.
   /// - Parameter chatIdentifier: e.g. `"iMessage;-;+14155551212"` or a chat GUID.
@@ -47,8 +48,8 @@ public struct TypingIndicator: Sendable {
     }
     defer { dlclose(handle) }
 
-    try ensureDaemonConnection(handle: handle)
-    let chat = try lookupChat(handle: handle, identifier: chatIdentifier)
+    try ensureDaemonConnection()
+    let chat = try lookupChat(identifier: chatIdentifier)
 
     let selector = sel_registerName("setLocalUserIsTyping:")
     guard let method = class_getInstanceMethod(object_getClass(chat), selector) else {
@@ -81,7 +82,7 @@ public struct TypingIndicator: Sendable {
     stopped = true
   }
 
-  private static func ensureDaemonConnection(handle: UnsafeMutableRawPointer) throws {
+  private static func ensureDaemonConnection() throws {
     guard let controllerClass = objc_getClass("IMDaemonController") as? NSObject.Type else {
       throw IMsgError.typingIndicatorFailed("IMDaemonController class not found")
     }
@@ -95,17 +96,40 @@ public struct TypingIndicator: Sendable {
       throw IMsgError.typingIndicatorFailed("Failed to get IMDaemonController shared instance")
     }
 
+    if hasLiveDaemonConnection(controller) {
+      daemonConnectionTracker.lock.lock()
+      daemonConnectionTracker.hasAttemptedConnection = true
+      daemonConnectionTracker.lock.unlock()
+      return
+    }
+
+    daemonConnectionTracker.lock.lock()
+    let shouldAttemptConnection = !daemonConnectionTracker.hasAttemptedConnection
+    if shouldAttemptConnection {
+      daemonConnectionTracker.hasAttemptedConnection = true
+    }
+    daemonConnectionTracker.lock.unlock()
+    if !shouldAttemptConnection { return }
+
     let connectSel = sel_registerName("connectToDaemon")
     if controller.responds(to: connectSel) {
       _ = controller.perform(connectSel)
     }
-
-    Thread.sleep(forTimeInterval: 0.5)
   }
 
-  private static func lookupChat(
-    handle: UnsafeMutableRawPointer, identifier: String
-  ) throws -> NSObject {
+  private static func hasLiveDaemonConnection(_ controller: AnyObject) -> Bool {
+    let isConnectedSel = sel_registerName("isConnected")
+    guard controller.responds(to: isConnectedSel) else { return false }
+    guard let value = controller.perform(isConnectedSel)?.takeUnretainedValue() else {
+      return false
+    }
+    if let number = value as? NSNumber {
+      return number.boolValue
+    }
+    return false
+  }
+
+  private static func lookupChat(identifier: String) throws -> NSObject {
     guard let registryClass = objc_getClass("IMChatRegistry") as? NSObject.Type else {
       throw IMsgError.typingIndicatorFailed("IMChatRegistry class not found")
     }
@@ -140,4 +164,9 @@ public struct TypingIndicator: Sendable {
       "Chat not found for identifier: \(identifier). "
         + "Make sure Messages.app has an active conversation with this contact.")
   }
+}
+
+private final class DaemonConnectionTracker: @unchecked Sendable {
+  let lock = NSLock()
+  var hasAttemptedConnection = false
 }

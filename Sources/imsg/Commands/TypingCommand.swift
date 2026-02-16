@@ -42,38 +42,55 @@ enum TypingCommand {
     values: ParsedValues,
     runtime: RuntimeOptions,
     storeFactory: @escaping (String) throws -> MessageStore = { try MessageStore(path: $0) },
-    startTyping: @escaping (String) throws -> Void = { try TypingIndicator.startTyping(chatIdentifier: $0) },
-    stopTyping: @escaping (String) throws -> Void = { try TypingIndicator.stopTyping(chatIdentifier: $0) },
+    startTyping: @escaping (String) throws -> Void = {
+      try TypingIndicator.startTyping(chatIdentifier: $0)
+    },
+    stopTyping: @escaping (String) throws -> Void = {
+      try TypingIndicator.stopTyping(chatIdentifier: $0)
+    },
     typeForDuration: @escaping (String, TimeInterval) async throws -> Void = {
       try await TypingIndicator.typeForDuration(chatIdentifier: $0, duration: $1)
     }
   ) async throws {
     let dbPath = values.option("db") ?? MessageStore.defaultPath
-    let recipient = values.option("to") ?? ""
-    let chatID = values.optionInt64("chatID")
-    let chatIdentifier = values.option("chatIdentifier") ?? ""
-    let chatGUID = values.option("chatGUID") ?? ""
-    let hasChatTarget = chatID != nil || !chatIdentifier.isEmpty || !chatGUID.isEmpty
+    let input = ChatTargetInput(
+      recipient: values.option("to") ?? "",
+      chatID: values.optionInt64("chatID"),
+      chatIdentifier: values.option("chatIdentifier") ?? "",
+      chatGUID: values.option("chatGUID") ?? ""
+    )
     let stopFlag = try parseStopFlag(values.option("stop"))
     let durationRaw = values.option("duration") ?? ""
     let serviceRaw = values.option("service") ?? "imessage"
 
-    if hasChatTarget && !recipient.isEmpty {
-      throw ParsedValuesError.invalidOption("to")
-    }
-    if !hasChatTarget && recipient.isEmpty {
-      throw ParsedValuesError.missingOption("to")
-    }
-
-    let resolvedIdentifier = try resolveIdentifier(
-      dbPath: dbPath,
-      recipient: recipient,
-      chatID: chatID,
-      chatIdentifier: chatIdentifier,
-      chatGUID: chatGUID,
-      service: serviceRaw,
-      storeFactory: storeFactory
+    try ChatTargetResolver.validateRecipientRequirements(
+      input: input,
+      mixedTargetError: ParsedValuesError.invalidOption("to"),
+      missingRecipientError: ParsedValuesError.missingOption("to")
     )
+
+    let resolvedTarget = try await ChatTargetResolver.resolveChatTarget(
+      input: input,
+      lookupChat: { chatID in
+        let store = try storeFactory(dbPath)
+        return try store.chatInfo(chatID: chatID)
+      },
+      unknownChatError: { chatID in
+        IMsgError.invalidChatTarget("Unknown chat id \(chatID)")
+      }
+    )
+    let resolvedIdentifier: String
+    if let preferred = resolvedTarget.preferredIdentifier {
+      resolvedIdentifier = preferred
+    } else if input.hasChatTarget {
+      throw IMsgError.invalidChatTarget("Missing chat identifier or guid")
+    } else {
+      resolvedIdentifier = try ChatTargetResolver.directTypingIdentifier(
+        recipient: input.recipient,
+        serviceRaw: serviceRaw,
+        invalidServiceError: { IMsgError.invalidService($0) }
+      )
+    }
 
     if stopFlag {
       try stopTyping(resolvedIdentifier)
@@ -102,32 +119,6 @@ enum TypingCommand {
     } else {
       Swift.print("typing indicator started")
     }
-  }
-
-  private static func resolveIdentifier(
-    dbPath: String,
-    recipient: String,
-    chatID: Int64?,
-    chatIdentifier: String,
-    chatGUID: String,
-    service: String,
-    storeFactory: (String) throws -> MessageStore
-  ) throws -> String {
-    if !chatGUID.isEmpty { return chatGUID }
-    if !chatIdentifier.isEmpty { return chatIdentifier }
-    if let chatID {
-      let store = try storeFactory(dbPath)
-      guard let info = try store.chatInfo(chatID: chatID) else {
-        throw IMsgError.invalidChatTarget("Unknown chat id \(chatID)")
-      }
-      if !info.guid.isEmpty { return info.guid }
-      return info.identifier
-    }
-    guard let messageService = MessageService(rawValue: service.lowercased()) else {
-      throw IMsgError.invalidService(service)
-    }
-    let svc = messageService == .sms ? "SMS" : "iMessage"
-    return "\(svc);-;\(recipient)"
   }
 
   private static func parseStopFlag(_ raw: String?) throws -> Bool {

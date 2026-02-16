@@ -42,7 +42,7 @@ public enum IMsgError: LocalizedError, Sendable {
     case .invalidReaction(let value):
       return """
         Invalid reaction: \(value)
-        
+
         Valid reactions: love, like, dislike, laugh, emphasis, question
         Or use an emoji for custom reactions (e.g., 🎉)
         """

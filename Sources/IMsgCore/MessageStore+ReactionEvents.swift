@@ -53,12 +53,14 @@ public struct ReactionEvent: Sendable, Equatable {
 extension MessageStore {
   /// Fetch reaction events (add/remove) after a given rowID.
   /// These are the reaction messages themselves, useful for streaming reaction events in watch mode.
-  public func reactionEventsAfter(afterRowID: Int64, chatID: Int64?, limit: Int) throws -> [ReactionEvent] {
+  public func reactionEventsAfter(afterRowID: Int64, chatID: Int64?, limit: Int) throws
+    -> [ReactionEvent]
+  {
     guard hasReactionColumns else { return [] }
-    
+
     let bodyColumn = hasAttributedBody ? "m.attributedBody" : "NULL"
     let destinationCallerColumn = hasDestinationCallerID ? "m.destination_caller_id" : "NULL"
-    
+
     var sql = """
       SELECT m.ROWID, cmj.chat_id, m.associated_message_type, m.associated_message_guid,
              m.handle_id, h.id, m.is_from_me, m.date, IFNULL(m.text, '') AS text,
@@ -68,21 +70,21 @@ extension MessageStore {
       FROM message m
       LEFT JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
       LEFT JOIN handle h ON m.handle_id = h.ROWID
-      LEFT JOIN message orig ON (orig.guid = m.associated_message_guid 
+      LEFT JOIN message orig ON (orig.guid = m.associated_message_guid
         OR m.associated_message_guid LIKE '%/' || orig.guid)
       WHERE m.ROWID > ?
         AND m.associated_message_type >= 2000
         AND m.associated_message_type <= 3006
       """
     var bindings: [Binding?] = [afterRowID]
-    
+
     if let chatID {
       sql += " AND cmj.chat_id = ?"
       bindings.append(chatID)
     }
     sql += " ORDER BY m.ROWID ASC LIMIT ?"
     bindings.append(limit)
-    
+
     return try withConnection { db in
       var events: [ReactionEvent] = []
       for row in try db.prepare(sql, bindings) {
@@ -113,21 +115,22 @@ extension MessageStore {
           continue
         }
 
-        events.append(ReactionEvent(
-          rowID: rowID,
-          chatID: resolvedChatID,
-          reactionType: reactionType,
-          isAdd: isAdd,
-          sender: sender,
-          isFromMe: isFromMe,
-          date: date,
-          reactedToGUID: decoded.reactedToGUID ?? "",
-          reactedToID: origRowID,
-          text: resolvedText
-        ))
+        events.append(
+          ReactionEvent(
+            rowID: rowID,
+            chatID: resolvedChatID,
+            reactionType: reactionType,
+            isAdd: isAdd,
+            sender: sender,
+            isFromMe: isFromMe,
+            date: date,
+            reactedToGUID: decoded.reactedToGUID ?? "",
+            reactedToID: origRowID,
+            text: resolvedText
+          ))
       }
       return events
     }
   }
-  
+
 }

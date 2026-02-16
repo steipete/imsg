@@ -8,12 +8,12 @@ enum ReactCommand {
     abstract: "Send a tapback reaction to the most recent message",
     discussion: """
       Sends a tapback reaction to the most recent incoming message in the specified chat.
-      
+
       IMPORTANT LIMITATIONS:
       - Only reacts to the MOST RECENT incoming message in the conversation
       - Requires Messages.app to be running
       - Uses UI automation (System Events) which requires accessibility permissions
-      
+
       Reaction types:
         love (❤️), like (👍), dislike (👎), laugh (😂), emphasis (‼️), question (❓)
         Or any single emoji for custom reactions (iOS 17+ / macOS 14+)
@@ -22,8 +22,9 @@ enum ReactCommand {
       CommandSignature(
         options: CommandSignatures.baseOptions() + [
           .make(label: "chatID", names: [.long("chat-id")], help: "chat rowid to react in"),
-          .make(label: "reaction", names: [.long("reaction"), .short("r")], 
-                help: "reaction type: love, like, dislike, laugh, emphasis, question, or emoji"),
+          .make(
+            label: "reaction", names: [.long("reaction"), .short("r")],
+            help: "reaction type: love, like, dislike, laugh, emphasis, question, or emoji"),
         ],
         flags: []
       )
@@ -54,7 +55,7 @@ enum ReactCommand {
     guard let reactionType = ReactionType.parse(reactionString) else {
       throw IMsgError.invalidReaction(reactionString)
     }
-    if case let .custom(emoji) = reactionType, !isSingleEmoji(emoji) {
+    if case .custom(let emoji) = reactionType, !isSingleEmoji(emoji) {
       throw IMsgError.invalidReaction(reactionString)
     }
 
@@ -219,7 +220,7 @@ struct ReactResult: Codable {
   let chatID: Int64
   let reactionType: String
   let reactionEmoji: String
-  
+
   enum CodingKeys: String, CodingKey {
     case success
     case chatID = "chat_id"

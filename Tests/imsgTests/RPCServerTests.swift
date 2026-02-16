@@ -1,82 +1,8 @@
 import Foundation
-import SQLite
 import Testing
 
 @testable import IMsgCore
 @testable import imsg
-
-private enum RPCTestDatabase {
-  static func appleEpoch(_ date: Date) -> Int64 {
-    let seconds = date.timeIntervalSince1970 - MessageStore.appleEpochOffset
-    return Int64(seconds * 1_000_000_000)
-  }
-
-  static func makeStore() throws -> MessageStore {
-    let db = try Connection(.inMemory)
-    try db.execute(
-      """
-      CREATE TABLE message (
-        ROWID INTEGER PRIMARY KEY,
-        handle_id INTEGER,
-        text TEXT,
-        date INTEGER,
-        is_from_me INTEGER,
-        service TEXT
-      );
-      """
-    )
-    try db.execute(
-      """
-      CREATE TABLE chat (
-        ROWID INTEGER PRIMARY KEY,
-        chat_identifier TEXT,
-        guid TEXT,
-        display_name TEXT,
-        service_name TEXT
-      );
-      """
-    )
-    try db.execute("CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT);")
-    try db.execute("CREATE TABLE chat_handle_join (chat_id INTEGER, handle_id INTEGER);")
-    try db.execute("CREATE TABLE chat_message_join (chat_id INTEGER, message_id INTEGER);")
-    try db.execute(
-      """
-      CREATE TABLE attachment (
-        ROWID INTEGER PRIMARY KEY,
-        filename TEXT,
-        transfer_name TEXT,
-        uti TEXT,
-        mime_type TEXT,
-        total_bytes INTEGER,
-        is_sticker INTEGER
-      );
-      """
-    )
-    try db.execute(
-      "CREATE TABLE message_attachment_join (message_id INTEGER, attachment_id INTEGER);")
-
-    let now = Date()
-    try db.run(
-      """
-      INSERT INTO chat(ROWID, chat_identifier, guid, display_name, service_name)
-      VALUES (1, 'iMessage;+;chat123', 'iMessage;+;chat123', 'Group Chat', 'iMessage')
-      """
-    )
-    try db.run("INSERT INTO handle(ROWID, id) VALUES (1, '+123'), (2, 'me@icloud.com')")
-    try db.run("INSERT INTO chat_handle_join(chat_id, handle_id) VALUES (1, 1), (1, 2)")
-    try db.run(
-      """
-      INSERT INTO message(ROWID, handle_id, text, date, is_from_me, service)
-      VALUES (5, 1, 'hello', ?, 0, 'iMessage')
-      """,
-      appleEpoch(now)
-    )
-    try db.run("INSERT INTO chat_message_join(chat_id, message_id) VALUES (1, 5)")
-
-    return try MessageStore(
-      connection: db, path: ":memory:", hasAttributedBody: false, hasReactionColumns: false)
-  }
-}
 
 final class TestRPCOutput: RPCOutput, @unchecked Sendable {
   private let lock = NSLock()
@@ -117,7 +43,7 @@ private func int64Value(_ value: Any?) -> Int64? {
 
 @Test
 func rpcChatsListReturnsChatPayload() async throws {
-  let store = try RPCTestDatabase.makeStore()
+  let store = try CommandTestDatabase.makeStoreForRPC()
   let output = TestRPCOutput()
   let server = RPCServer(store: store, verbose: false, output: output)
 
@@ -137,7 +63,7 @@ func rpcChatsListReturnsChatPayload() async throws {
 
 @Test
 func rpcMessagesHistoryIncludesChatFields() async throws {
-  let store = try RPCTestDatabase.makeStore()
+  let store = try CommandTestDatabase.makeStoreForRPC()
   let output = TestRPCOutput()
   let server = RPCServer(store: store, verbose: false, output: output)
 
@@ -156,7 +82,7 @@ func rpcMessagesHistoryIncludesChatFields() async throws {
 
 @Test
 func rpcSendResolvesChatID() async throws {
-  let store = try RPCTestDatabase.makeStore()
+  let store = try CommandTestDatabase.makeStoreForRPC()
   let output = TestRPCOutput()
   var captured: MessageSendOptions?
   let server = RPCServer(
@@ -177,7 +103,7 @@ func rpcSendResolvesChatID() async throws {
 
 @Test
 func rpcSendRejectsMissingTextAndFile() async throws {
-  let store = try RPCTestDatabase.makeStore()
+  let store = try CommandTestDatabase.makeStoreForRPC()
   let output = TestRPCOutput()
   let server = RPCServer(store: store, verbose: false, output: output)
 
@@ -191,7 +117,7 @@ func rpcSendRejectsMissingTextAndFile() async throws {
 
 @Test
 func rpcRejectsInvalidJSON() async throws {
-  let store = try RPCTestDatabase.makeStore()
+  let store = try CommandTestDatabase.makeStoreForRPC()
   let output = TestRPCOutput()
   let server = RPCServer(store: store, verbose: false, output: output)
 
@@ -203,7 +129,7 @@ func rpcRejectsInvalidJSON() async throws {
 
 @Test
 func rpcRejectsNonObjectRequest() async throws {
-  let store = try RPCTestDatabase.makeStore()
+  let store = try CommandTestDatabase.makeStoreForRPC()
   let output = TestRPCOutput()
   let server = RPCServer(store: store, verbose: false, output: output)
 
@@ -215,7 +141,7 @@ func rpcRejectsNonObjectRequest() async throws {
 
 @Test
 func rpcRejectsInvalidJSONRPCVersion() async throws {
-  let store = try RPCTestDatabase.makeStore()
+  let store = try CommandTestDatabase.makeStoreForRPC()
   let output = TestRPCOutput()
   let server = RPCServer(store: store, verbose: false, output: output)
 
@@ -228,7 +154,7 @@ func rpcRejectsInvalidJSONRPCVersion() async throws {
 
 @Test
 func rpcRejectsMissingMethod() async throws {
-  let store = try RPCTestDatabase.makeStore()
+  let store = try CommandTestDatabase.makeStoreForRPC()
   let output = TestRPCOutput()
   let server = RPCServer(store: store, verbose: false, output: output)
 
@@ -241,7 +167,7 @@ func rpcRejectsMissingMethod() async throws {
 
 @Test
 func rpcReportsMethodNotFound() async throws {
-  let store = try RPCTestDatabase.makeStore()
+  let store = try CommandTestDatabase.makeStoreForRPC()
   let output = TestRPCOutput()
   let server = RPCServer(store: store, verbose: false, output: output)
 
@@ -254,7 +180,7 @@ func rpcReportsMethodNotFound() async throws {
 
 @Test
 func rpcHistoryRequiresChatID() async throws {
-  let store = try RPCTestDatabase.makeStore()
+  let store = try CommandTestDatabase.makeStoreForRPC()
   let output = TestRPCOutput()
   let server = RPCServer(store: store, verbose: false, output: output)
 
@@ -267,7 +193,7 @@ func rpcHistoryRequiresChatID() async throws {
 
 @Test
 func rpcSendRejectsInvalidService() async throws {
-  let store = try RPCTestDatabase.makeStore()
+  let store = try CommandTestDatabase.makeStoreForRPC()
   let output = TestRPCOutput()
   let server = RPCServer(store: store, verbose: false, output: output)
 
@@ -281,7 +207,7 @@ func rpcSendRejectsInvalidService() async throws {
 
 @Test
 func rpcSendRejectsMissingRecipientForDirectSend() async throws {
-  let store = try RPCTestDatabase.makeStore()
+  let store = try CommandTestDatabase.makeStoreForRPC()
   let output = TestRPCOutput()
   let server = RPCServer(store: store, verbose: false, output: output)
 
@@ -294,7 +220,7 @@ func rpcSendRejectsMissingRecipientForDirectSend() async throws {
 
 @Test
 func rpcSendRejectsChatAndRecipient() async throws {
-  let store = try RPCTestDatabase.makeStore()
+  let store = try CommandTestDatabase.makeStoreForRPC()
   let output = TestRPCOutput()
   let server = RPCServer(store: store, verbose: false, output: output)
 
@@ -308,7 +234,7 @@ func rpcSendRejectsChatAndRecipient() async throws {
 
 @Test
 func rpcSendRejectsUnknownChatID() async throws {
-  let store = try RPCTestDatabase.makeStore()
+  let store = try CommandTestDatabase.makeStoreForRPC()
   let output = TestRPCOutput()
   let server = RPCServer(store: store, verbose: false, output: output)
 
@@ -321,7 +247,7 @@ func rpcSendRejectsUnknownChatID() async throws {
 
 @Test
 func rpcTypingStartResolvesSMSRecipient() async throws {
-  let store = try RPCTestDatabase.makeStore()
+  let store = try CommandTestDatabase.makeStoreForRPC()
   let output = TestRPCOutput()
   var startedIdentifier: String?
   let server = RPCServer(
@@ -343,7 +269,7 @@ func rpcTypingStartResolvesSMSRecipient() async throws {
 
 @Test
 func rpcTypingStopResolvesChatID() async throws {
-  let store = try RPCTestDatabase.makeStore()
+  let store = try CommandTestDatabase.makeStoreForRPC()
   let output = TestRPCOutput()
   var stoppedIdentifier: String?
   let server = RPCServer(
@@ -364,7 +290,7 @@ func rpcTypingStopResolvesChatID() async throws {
 
 @Test
 func rpcTypingRejectsInvalidService() async throws {
-  let store = try RPCTestDatabase.makeStore()
+  let store = try CommandTestDatabase.makeStoreForRPC()
   let output = TestRPCOutput()
   let server = RPCServer(store: store, verbose: false, output: output)
 
@@ -378,7 +304,7 @@ func rpcTypingRejectsInvalidService() async throws {
 
 @Test
 func rpcTypingRejectsChatAndRecipient() async throws {
-  let store = try RPCTestDatabase.makeStore()
+  let store = try CommandTestDatabase.makeStoreForRPC()
   let output = TestRPCOutput()
   let server = RPCServer(store: store, verbose: false, output: output)
 
@@ -392,7 +318,7 @@ func rpcTypingRejectsChatAndRecipient() async throws {
 
 @Test
 func rpcWatchSubscribeEmitsNotificationAndUnsubscribe() async throws {
-  let store = try RPCTestDatabase.makeStore()
+  let store = try CommandTestDatabase.makeStoreForRPC()
   let output = TestRPCOutput()
   let server = RPCServer(store: store, verbose: false, output: output)
 
@@ -422,7 +348,7 @@ func rpcWatchSubscribeEmitsNotificationAndUnsubscribe() async throws {
 
 @Test
 func rpcWatchUnsubscribeRequiresSubscription() async throws {
-  let store = try RPCTestDatabase.makeStore()
+  let store = try CommandTestDatabase.makeStoreForRPC()
   let output = TestRPCOutput()
   let server = RPCServer(store: store, verbose: false, output: output)
 

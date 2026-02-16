@@ -28,9 +28,9 @@ enum WatchCommand {
             label: "attachments", names: [.long("attachments")], help: "include attachment metadata"
           ),
           .make(
-            label: "reactions", names: [.long("reactions")], 
+            label: "reactions", names: [.long("reactions")],
             help: "include reaction events (tapback add/remove) in the stream"
-          )
+          ),
         ]
       )
     ),

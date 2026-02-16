@@ -10,10 +10,45 @@ enum CommandTestDatabase {
   }
 
   static func makePath() throws -> String {
+    let path = try makeDatabasePath()
+    let db = try Connection(path)
+    try createSchema(db, includeChatHandleJoin: false)
+    try seedBasicChat(db)
+    return path
+  }
+
+  static func makePathWithAttachment() throws -> String {
+    let path = try makePath()
+    let db = try Connection(path)
+    try db.run(
+      """
+      INSERT INTO attachment(ROWID, filename, transfer_name, uti, mime_type, total_bytes, is_sticker)
+      VALUES (1, '/tmp/file.dat', 'file.dat', 'public.data', 'application/octet-stream', 10, 0)
+      """
+    )
+    try db.run("INSERT INTO message_attachment_join(message_id, attachment_id) VALUES (1, 1)")
+    return path
+  }
+
+  static func makeStoreForRPC() throws -> MessageStore {
+    let db = try Connection(.inMemory)
+    try createSchema(db, includeChatHandleJoin: true)
+    try seedRPCChat(db)
+    return try MessageStore(
+      connection: db,
+      path: ":memory:",
+      hasAttributedBody: false,
+      hasReactionColumns: false
+    )
+  }
+
+  private static func makeDatabasePath() throws -> String {
     let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-    let path = dir.appendingPathComponent("chat.db").path
-    let db = try Connection(path)
+    return dir.appendingPathComponent("chat.db").path
+  }
+
+  private static func createSchema(_ db: Connection, includeChatHandleJoin: Bool) throws {
     try db.execute(
       """
       CREATE TABLE message (
@@ -38,6 +73,9 @@ enum CommandTestDatabase {
       """
     )
     try db.execute("CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT);")
+    if includeChatHandleJoin {
+      try db.execute("CREATE TABLE chat_handle_join (chat_id INTEGER, handle_id INTEGER);")
+    }
     try db.execute("CREATE TABLE chat_message_join (chat_id INTEGER, message_id INTEGER);")
     try db.execute(
       "CREATE TABLE message_attachment_join (message_id INTEGER, attachment_id INTEGER);")
@@ -54,7 +92,9 @@ enum CommandTestDatabase {
       );
       """
     )
+  }
 
+  private static func seedBasicChat(_ db: Connection) throws {
     let now = Date()
     try db.run(
       """
@@ -71,19 +111,25 @@ enum CommandTestDatabase {
       appleEpoch(now)
     )
     try db.run("INSERT INTO chat_message_join(chat_id, message_id) VALUES (1, 1)")
-    return path
   }
 
-  static func makePathWithAttachment() throws -> String {
-    let path = try makePath()
-    let db = try Connection(path)
+  private static func seedRPCChat(_ db: Connection) throws {
+    let now = Date()
     try db.run(
       """
-      INSERT INTO attachment(ROWID, filename, transfer_name, uti, mime_type, total_bytes, is_sticker)
-      VALUES (1, '/tmp/file.dat', 'file.dat', 'public.data', 'application/octet-stream', 10, 0)
+      INSERT INTO chat(ROWID, chat_identifier, guid, display_name, service_name)
+      VALUES (1, 'iMessage;+;chat123', 'iMessage;+;chat123', 'Group Chat', 'iMessage')
       """
     )
-    try db.run("INSERT INTO message_attachment_join(message_id, attachment_id) VALUES (1, 1)")
-    return path
+    try db.run("INSERT INTO handle(ROWID, id) VALUES (1, '+123'), (2, 'me@icloud.com')")
+    try db.run("INSERT INTO chat_handle_join(chat_id, handle_id) VALUES (1, 1), (1, 2)")
+    try db.run(
+      """
+      INSERT INTO message(ROWID, handle_id, text, date, is_from_me, service)
+      VALUES (5, 1, 'hello', ?, 0, 'iMessage')
+      """,
+      appleEpoch(now)
+    )
+    try db.run("INSERT INTO chat_message_join(chat_id, message_id) VALUES (1, 5)")
   }
 }
