@@ -16,6 +16,7 @@ public final class MessageStore: @unchecked Sendable {
   private let queueKey = DispatchSpecificKey<Void>()
   let hasAttributedBody: Bool
   let hasReactionColumns: Bool
+  let hasThreadOriginatorGUIDColumn: Bool
   let hasDestinationCallerID: Bool
   let hasAudioMessageColumn: Bool
   let hasAttachmentUserInfo: Bool
@@ -30,17 +31,17 @@ public final class MessageStore: @unchecked Sendable {
       let location = Connection.Location.uri(uri, parameters: [.mode(.readOnly)])
       self.connection = try Connection(location, readonly: true)
       self.connection.busyTimeout = 5
-      self.hasAttributedBody = MessageStore.detectAttributedBody(connection: self.connection)
-      self.hasReactionColumns = MessageStore.detectReactionColumns(connection: self.connection)
-      self.hasDestinationCallerID = MessageStore.detectDestinationCallerID(
-        connection: self.connection
+      let messageColumns = MessageStore.tableColumns(connection: self.connection, table: "message")
+      let attachmentColumns = MessageStore.tableColumns(
+        connection: self.connection,
+        table: "attachment"
       )
-      self.hasAudioMessageColumn = MessageStore.detectAudioMessageColumn(
-        connection: self.connection
-      )
-      self.hasAttachmentUserInfo = MessageStore.detectAttachmentUserInfo(
-        connection: self.connection
-      )
+      self.hasAttributedBody = messageColumns.contains("attributedbody")
+      self.hasReactionColumns = MessageStore.reactionColumnsPresent(in: messageColumns)
+      self.hasThreadOriginatorGUIDColumn = messageColumns.contains("thread_originator_guid")
+      self.hasDestinationCallerID = messageColumns.contains("destination_caller_id")
+      self.hasAudioMessageColumn = messageColumns.contains("is_audio_message")
+      self.hasAttachmentUserInfo = attachmentColumns.contains("user_info")
     } catch {
       throw MessageStore.enhance(error: error, path: normalized)
     }
@@ -51,6 +52,7 @@ public final class MessageStore: @unchecked Sendable {
     path: String,
     hasAttributedBody: Bool? = nil,
     hasReactionColumns: Bool? = nil,
+    hasThreadOriginatorGUIDColumn: Bool? = nil,
     hasDestinationCallerID: Bool? = nil,
     hasAudioMessageColumn: Bool? = nil,
     hasAttachmentUserInfo: Bool? = nil
@@ -60,30 +62,37 @@ public final class MessageStore: @unchecked Sendable {
     self.queue.setSpecific(key: queueKey, value: ())
     self.connection = connection
     self.connection.busyTimeout = 5
+    let messageColumns = MessageStore.tableColumns(connection: connection, table: "message")
+    let attachmentColumns = MessageStore.tableColumns(connection: connection, table: "attachment")
     if let hasAttributedBody {
       self.hasAttributedBody = hasAttributedBody
     } else {
-      self.hasAttributedBody = MessageStore.detectAttributedBody(connection: connection)
+      self.hasAttributedBody = messageColumns.contains("attributedbody")
     }
     if let hasReactionColumns {
       self.hasReactionColumns = hasReactionColumns
     } else {
-      self.hasReactionColumns = MessageStore.detectReactionColumns(connection: connection)
+      self.hasReactionColumns = MessageStore.reactionColumnsPresent(in: messageColumns)
+    }
+    if let hasThreadOriginatorGUIDColumn {
+      self.hasThreadOriginatorGUIDColumn = hasThreadOriginatorGUIDColumn
+    } else {
+      self.hasThreadOriginatorGUIDColumn = messageColumns.contains("thread_originator_guid")
     }
     if let hasDestinationCallerID {
       self.hasDestinationCallerID = hasDestinationCallerID
     } else {
-      self.hasDestinationCallerID = MessageStore.detectDestinationCallerID(connection: connection)
+      self.hasDestinationCallerID = messageColumns.contains("destination_caller_id")
     }
     if let hasAudioMessageColumn {
       self.hasAudioMessageColumn = hasAudioMessageColumn
     } else {
-      self.hasAudioMessageColumn = MessageStore.detectAudioMessageColumn(connection: connection)
+      self.hasAudioMessageColumn = messageColumns.contains("is_audio_message")
     }
     if let hasAttachmentUserInfo {
       self.hasAttachmentUserInfo = hasAttachmentUserInfo
     } else {
-      self.hasAttachmentUserInfo = MessageStore.detectAttachmentUserInfo(connection: connection)
+      self.hasAttachmentUserInfo = attachmentColumns.contains("user_info")
     }
   }
 
@@ -365,23 +374,6 @@ extension MessageStore {
       }
     }
     return nil
-  }
-
-  private static func detectReactionColumns(connection: Connection) -> Bool {
-    do {
-      let rows = try connection.prepare("PRAGMA table_info(message)")
-      var columns = Set<String>()
-      for row in rows {
-        if let name = row[1] as? String {
-          columns.insert(name.lowercased())
-        }
-      }
-      return columns.contains("guid")
-        && columns.contains("associated_message_guid")
-        && columns.contains("associated_message_type")
-    } catch {
-      return false
-    }
   }
 
   private struct ReactionKey: Hashable {

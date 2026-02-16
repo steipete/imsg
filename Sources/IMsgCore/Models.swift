@@ -221,6 +221,7 @@ public struct Message: Sendable, Equatable {
   public let chatID: Int64
   public let guid: String
   public let replyToGUID: String?
+  public let threadOriginatorGUID: String?
   public let sender: String
   public let text: String
   public let date: Date
@@ -251,6 +252,7 @@ public struct Message: Sendable, Equatable {
     attachmentsCount: Int,
     guid: String = "",
     replyToGUID: String? = nil,
+    threadOriginatorGUID: String? = nil,
     isReaction: Bool = false,
     reactionType: ReactionType? = nil,
     isReactionAdd: Bool? = nil,
@@ -260,6 +262,7 @@ public struct Message: Sendable, Equatable {
     self.chatID = chatID
     self.guid = guid
     self.replyToGUID = replyToGUID
+    self.threadOriginatorGUID = threadOriginatorGUID
     self.sender = sender
     self.text = text
     self.date = date

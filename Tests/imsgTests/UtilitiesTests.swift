@@ -83,7 +83,8 @@ func outputModelsEncodeExpectedKeys() throws {
     handleID: nil,
     attachmentsCount: 0,
     guid: "msg-guid-7",
-    replyToGUID: "msg-guid-1"
+    replyToGUID: "msg-guid-1",
+    threadOriginatorGUID: "thread-guid-7"
   )
   let attachment = AttachmentMeta(
     filename: "file.dat",
@@ -110,6 +111,7 @@ func outputModelsEncodeExpectedKeys() throws {
   #expect(messageObject?["chat_id"] as? Int64 == 1)
   #expect(messageObject?["guid"] as? String == "msg-guid-7")
   #expect(messageObject?["reply_to_guid"] as? String == "msg-guid-1")
+  #expect(messageObject?["thread_originator_guid"] as? String == "thread-guid-7")
   #expect(messageObject?["created_at"] != nil)
 
   let attachmentPayload = AttachmentPayload(meta: attachment)
