@@ -1,24 +1,23 @@
 import Foundation
 
-/// Sends typing indicators for iMessage chats via the IMCore private framework.
+/// Sends typing indicators for iMessage chats.
 ///
-/// Uses runtime `dlopen` to load IMCore — the only way to programmatically toggle
-/// typing state. AppleScript has no equivalent capability.
-///
-/// Requires macOS 14+, Messages.app signed in, and an existing conversation with the contact.
+/// Prefers the IMCore bridge (via DYLD injection into Messages.app) which
+/// is reliable on stock macOS with SIP disabled. Falls back to direct
+/// IMCore access via `dlopen` when the bridge is unavailable.
 public struct TypingIndicator: Sendable {
   private static let daemonConnectionTracker = DaemonConnectionTracker()
 
   /// Start showing the typing indicator for a chat.
   /// - Parameter chatIdentifier: e.g. `"iMessage;-;+14155551212"` or a chat GUID.
-  /// - Throws: `IMsgError.typingIndicatorFailed` if IMCore is unavailable or chat not found.
+  /// - Throws: `IMsgError.typingIndicatorFailed` if both bridge and direct IMCore fail.
   public static func startTyping(chatIdentifier: String) throws {
     try setTyping(chatIdentifier: chatIdentifier, isTyping: true)
   }
 
   /// Stop showing the typing indicator for a chat.
   /// - Parameter chatIdentifier: The chat identifier string.
-  /// - Throws: `IMsgError.typingIndicatorFailed` if IMCore is unavailable or chat not found.
+  /// - Throws: `IMsgError.typingIndicatorFailed` if both bridge and direct IMCore fail.
   public static func stopTyping(chatIdentifier: String) throws {
     try setTyping(chatIdentifier: chatIdentifier, isTyping: false)
   }
@@ -40,6 +39,42 @@ public struct TypingIndicator: Sendable {
   // MARK: - Private
 
   private static func setTyping(chatIdentifier: String, isTyping: Bool) throws {
+    // Prefer the bridge (dylib injected into Messages.app)
+    let bridge = IMCoreBridge.shared
+    if bridge.isAvailable {
+      do {
+        try setTypingViaBridge(bridge: bridge, chatIdentifier: chatIdentifier, isTyping: isTyping)
+        return
+      } catch {
+        // Bridge failed — fall through to direct IMCore access
+      }
+    }
+
+    // Fallback: direct IMCore access (requires AMFI disabled + XPC plist)
+    try setTypingDirect(chatIdentifier: chatIdentifier, isTyping: isTyping)
+  }
+
+  /// Synchronous wrapper for the async bridge call using a Sendable result box.
+  private static func setTypingViaBridge(
+    bridge: IMCoreBridge, chatIdentifier: String, isTyping: Bool
+  ) throws {
+    let semaphore = DispatchSemaphore(value: 0)
+    let box = BridgeResultBox()
+    Task { @Sendable in
+      do {
+        try await bridge.setTyping(for: chatIdentifier, typing: isTyping)
+      } catch {
+        box.setError(error)
+      }
+      semaphore.signal()
+    }
+    semaphore.wait()
+    if let error = box.error {
+      throw error
+    }
+  }
+
+  private static func setTypingDirect(chatIdentifier: String, isTyping: Bool) throws {
     let frameworkPath = "/System/Library/PrivateFrameworks/IMCore.framework/IMCore"
     guard let handle = dlopen(frameworkPath, RTLD_LAZY) else {
       let error = String(cString: dlerror())
@@ -115,6 +150,24 @@ public struct TypingIndicator: Sendable {
     if controller.responds(to: connectSel) {
       _ = controller.perform(connectSel)
     }
+
+    let maxAttempts = 50
+    for _ in 0..<maxAttempts {
+      if hasLiveDaemonConnection(controller) {
+        return
+      }
+      Thread.sleep(forTimeInterval: 0.1)
+      RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.01))
+    }
+
+    if !hasLiveDaemonConnection(controller) {
+      throw IMsgError.typingIndicatorFailed(
+        "Failed to connect to imagent (iMessage daemon). "
+          + "This requires either SIP disabled with 'imsg launch', "
+          + "or system modifications (AMFI disabled + XPC plist). "
+          + "Run 'imsg status' for setup instructions."
+      )
+    }
   }
 
   private static func hasLiveDaemonConnection(_ controller: AnyObject) -> Bool {
@@ -169,4 +222,22 @@ public struct TypingIndicator: Sendable {
 private final class DaemonConnectionTracker: @unchecked Sendable {
   let lock = NSLock()
   var hasAttemptedConnection = false
+}
+
+/// Thread-safe box for passing an error out of a Task back to the calling thread.
+private final class BridgeResultBox: @unchecked Sendable {
+  private let lock = NSLock()
+  private var _error: Error?
+
+  var error: Error? {
+    lock.lock()
+    defer { lock.unlock() }
+    return _error
+  }
+
+  func setError(_ error: Error) {
+    lock.lock()
+    _error = error
+    lock.unlock()
+  }
 }
