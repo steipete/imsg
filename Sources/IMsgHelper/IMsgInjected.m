@@ -227,6 +227,27 @@ static NSDictionary* handleTyping(NSInteger requestId, NSDictionary *params) {
     }
 
     @try {
+        // Gather diagnostic info
+        NSString *chatGUID = @"unknown";
+        NSString *chatIdent = @"unknown";
+        NSString *chatClass = NSStringFromClass([chat class]);
+        BOOL supportsTyping = YES;
+
+        if ([chat respondsToSelector:@selector(guid)]) {
+            chatGUID = [chat performSelector:@selector(guid)] ?: @"nil";
+        }
+        if ([chat respondsToSelector:@selector(chatIdentifier)]) {
+            chatIdent = [chat performSelector:@selector(chatIdentifier)] ?: @"nil";
+        }
+
+        SEL supportsSel = @selector(supportsSendingTypingIndicators);
+        if ([chat respondsToSelector:supportsSel]) {
+            supportsTyping = ((BOOL (*)(id, SEL))objc_msgSend)(chat, supportsSel);
+        }
+
+        NSLog(@"[imsg-bridge] Chat found: class=%@, guid=%@, identifier=%@, supportsTyping=%@",
+              chatClass, chatGUID, chatIdent, supportsTyping ? @"YES" : @"NO");
+
         SEL typingSel = @selector(setLocalUserIsTyping:);
         if ([chat respondsToSelector:typingSel]) {
             NSMethodSignature *sig = [chat methodSignatureForSelector:typingSel];
