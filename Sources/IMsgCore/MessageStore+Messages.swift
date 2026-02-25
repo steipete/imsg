@@ -185,7 +185,8 @@ extension MessageStore {
              \(guidColumn) AS guid, \(associatedGuidColumn) AS associated_guid, \(associatedTypeColumn) AS associated_type,
              (SELECT COUNT(*) FROM message_attachment_join maj WHERE maj.message_id = m.ROWID) AS attachments,
              \(bodyColumn) AS body,
-             \(threadOriginatorColumn) AS thread_originator_guid
+             \(threadOriginatorColumn) AS thread_originator_guid,
+             m.balloon_bundle_id
       FROM message m
       LEFT JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
       LEFT JOIN handle h ON m.handle_id = h.ROWID
@@ -217,9 +218,28 @@ extension MessageStore {
       threadOriginatorGUID: 15
     )
 
+    let balloonBundleIDIndex = 16
+
     return try withConnection { db in
       var messages: [Message] = []
+      // Track URL balloon messages to deduplicate link preview re-deliveries.
+      // iMessage can write multiple rows for the same URL when the link preview resolves,
+      // producing duplicate messages with balloon_bundle_id = 'com.apple.messages.URLBalloonProvider'.
+      var seenURLBalloons: Set<String> = []
+
       for row in try db.prepare(sql, bindings) {
+        // Deduplicate URL balloon messages with the same sender + text
+        let balloonBundleID = stringValue(row[balloonBundleIDIndex])
+        if balloonBundleID == "com.apple.messages.URLBalloonProvider" {
+          let sender = stringValue(row[columns.sender])
+          let text = stringValue(row[columns.text])
+          let dedupeKey = "\(sender)|\(text)"
+          if seenURLBalloons.contains(dedupeKey) {
+            continue
+          }
+          seenURLBalloons.insert(dedupeKey)
+        }
+
         let decoded = try decodeMessageRow(row, columns: columns, fallbackChatID: chatID)
         let replyToGUID = replyToGUID(
           associatedGuid: decoded.associatedGUID,
