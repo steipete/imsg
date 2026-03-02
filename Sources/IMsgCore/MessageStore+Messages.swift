@@ -51,6 +51,8 @@ extension MessageStore {
     let associatedTypeColumn = hasReactionColumns ? "m.associated_message_type" : "NULL"
     let destinationCallerColumn = hasDestinationCallerID ? "m.destination_caller_id" : "NULL"
     let audioMessageColumn = hasAudioMessageColumn ? "m.is_audio_message" : "0"
+    let chatStyleColumn = hasChatStyleColumn ? "c.style" : "NULL"
+    let chatJoin = hasChatStyleColumn ? "JOIN chat c ON cmj.chat_id = c.ROWID" : ""
     let threadOriginatorColumn =
       hasThreadOriginatorGUIDColumn ? "m.thread_originator_guid" : "NULL"
     let reactionFilter =
@@ -59,7 +61,7 @@ extension MessageStore {
       : ""
     var sql = """
       SELECT m.ROWID, m.handle_id, h.id, IFNULL(m.text, '') AS text, m.date, m.is_from_me, m.service,
-             c.style AS chat_style,
+             \(chatStyleColumn) AS chat_style,
              \(audioMessageColumn) AS is_audio_message, \(destinationCallerColumn) AS destination_caller_id,
              \(guidColumn) AS guid, \(associatedGuidColumn) AS associated_guid, \(associatedTypeColumn) AS associated_type,
              (SELECT COUNT(*) FROM message_attachment_join maj WHERE maj.message_id = m.ROWID) AS attachments,
@@ -67,7 +69,7 @@ extension MessageStore {
              \(threadOriginatorColumn) AS thread_originator_guid
       FROM message m
       JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
-      JOIN chat c ON cmj.chat_id = c.ROWID
+      \(chatJoin)
       LEFT JOIN handle h ON m.handle_id = h.ROWID
       WHERE cmj.chat_id = ?\(reactionFilter)
       """
@@ -171,6 +173,8 @@ extension MessageStore {
     let associatedTypeColumn = hasReactionColumns ? "m.associated_message_type" : "NULL"
     let destinationCallerColumn = hasDestinationCallerID ? "m.destination_caller_id" : "NULL"
     let audioMessageColumn = hasAudioMessageColumn ? "m.is_audio_message" : "0"
+    let chatStyleColumn = hasChatStyleColumn ? "c.style" : "NULL"
+    let chatJoin = hasChatStyleColumn ? "LEFT JOIN chat c ON cmj.chat_id = c.ROWID" : ""
     let balloonBundleIDColumn = hasBalloonBundleIDColumn ? "m.balloon_bundle_id" : "NULL"
     let threadOriginatorColumn =
       hasThreadOriginatorGUIDColumn ? "m.thread_originator_guid" : "NULL"
@@ -188,7 +192,7 @@ extension MessageStore {
     }
     var sql = """
       SELECT m.ROWID, cmj.chat_id, m.handle_id, h.id, IFNULL(m.text, '') AS text, m.date, m.is_from_me, m.service,
-             c.style AS chat_style,
+             \(chatStyleColumn) AS chat_style,
              \(audioMessageColumn) AS is_audio_message, \(destinationCallerColumn) AS destination_caller_id,
              \(guidColumn) AS guid, \(associatedGuidColumn) AS associated_guid, \(associatedTypeColumn) AS associated_type,
              (SELECT COUNT(*) FROM message_attachment_join maj WHERE maj.message_id = m.ROWID) AS attachments,
@@ -197,7 +201,7 @@ extension MessageStore {
              \(balloonBundleIDColumn) AS balloon_bundle_id
       FROM message m
       LEFT JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
-      LEFT JOIN chat c ON cmj.chat_id = c.ROWID
+      \(chatJoin)
       LEFT JOIN handle h ON m.handle_id = h.ROWID
       WHERE m.ROWID > ?\(reactionFilter)
       """

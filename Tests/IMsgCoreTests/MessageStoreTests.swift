@@ -92,6 +92,7 @@ func messagesByChatReturnsMessages() throws {
   #expect(messages.count == 3)
   #expect(messages[1].isFromMe)
   #expect(messages[0].attachmentsCount == 0)
+  #expect(messages.allSatisfy { !$0.isGroup })
 }
 
 @Test

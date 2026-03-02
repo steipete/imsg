@@ -21,6 +21,7 @@ public final class MessageStore: @unchecked Sendable {
   let hasAudioMessageColumn: Bool
   let hasAttachmentUserInfo: Bool
   let hasBalloonBundleIDColumn: Bool
+  let hasChatStyleColumn: Bool
 
   private struct URLBalloonDedupeEntry: Sendable {
     let rowID: Int64
@@ -47,6 +48,7 @@ public final class MessageStore: @unchecked Sendable {
         connection: self.connection,
         table: "attachment"
       )
+      let chatColumns = MessageStore.tableColumns(connection: self.connection, table: "chat")
       self.hasAttributedBody = messageColumns.contains("attributedbody")
       self.hasReactionColumns = MessageStore.reactionColumnsPresent(in: messageColumns)
       self.hasThreadOriginatorGUIDColumn = messageColumns.contains("thread_originator_guid")
@@ -54,6 +56,7 @@ public final class MessageStore: @unchecked Sendable {
       self.hasAudioMessageColumn = messageColumns.contains("is_audio_message")
       self.hasAttachmentUserInfo = attachmentColumns.contains("user_info")
       self.hasBalloonBundleIDColumn = messageColumns.contains("balloon_bundle_id")
+      self.hasChatStyleColumn = chatColumns.contains("style")
     } catch {
       throw MessageStore.enhance(error: error, path: normalized)
     }
@@ -68,7 +71,8 @@ public final class MessageStore: @unchecked Sendable {
     hasDestinationCallerID: Bool? = nil,
     hasAudioMessageColumn: Bool? = nil,
     hasAttachmentUserInfo: Bool? = nil,
-    hasBalloonBundleIDColumn: Bool? = nil
+    hasBalloonBundleIDColumn: Bool? = nil,
+    hasChatStyleColumn: Bool? = nil
   ) throws {
     self.path = path
     self.queue = DispatchQueue(label: "imsg.db.test", qos: .userInitiated)
@@ -77,6 +81,7 @@ public final class MessageStore: @unchecked Sendable {
     self.connection.busyTimeout = 5
     let messageColumns = MessageStore.tableColumns(connection: connection, table: "message")
     let attachmentColumns = MessageStore.tableColumns(connection: connection, table: "attachment")
+    let chatColumns = MessageStore.tableColumns(connection: connection, table: "chat")
     if let hasAttributedBody {
       self.hasAttributedBody = hasAttributedBody
     } else {
@@ -111,6 +116,11 @@ public final class MessageStore: @unchecked Sendable {
       self.hasBalloonBundleIDColumn = hasBalloonBundleIDColumn
     } else {
       self.hasBalloonBundleIDColumn = messageColumns.contains("balloon_bundle_id")
+    }
+    if let hasChatStyleColumn {
+      self.hasChatStyleColumn = hasChatStyleColumn
+    } else {
+      self.hasChatStyleColumn = chatColumns.contains("style")
     }
   }
 
