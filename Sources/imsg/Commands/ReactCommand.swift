@@ -164,6 +164,8 @@ enum ReactCommand {
             keystroke "t" using command down
             delay 0.2
             keystroke reactionKey
+            delay 0.1
+            key code 36
           end tell
         end tell
       end run
