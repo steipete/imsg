@@ -10,6 +10,7 @@ private struct MessageRowColumns {
   let date: Int
   let isFromMe: Int
   let service: Int
+  let chatStyle: Int
   let isAudioMessage: Int
   let destinationCallerID: Int
   let guid: Int
@@ -29,6 +30,7 @@ private struct DecodedMessageRow {
   let date: Date
   let isFromMe: Bool
   let service: String
+  let isGroup: Bool
   let destinationCallerID: String
   let guid: String
   let associatedGUID: String
@@ -57,6 +59,7 @@ extension MessageStore {
       : ""
     var sql = """
       SELECT m.ROWID, m.handle_id, h.id, IFNULL(m.text, '') AS text, m.date, m.is_from_me, m.service,
+             c.style AS chat_style,
              \(audioMessageColumn) AS is_audio_message, \(destinationCallerColumn) AS destination_caller_id,
              \(guidColumn) AS guid, \(associatedGuidColumn) AS associated_guid, \(associatedTypeColumn) AS associated_type,
              (SELECT COUNT(*) FROM message_attachment_join maj WHERE maj.message_id = m.ROWID) AS attachments,
@@ -64,6 +67,7 @@ extension MessageStore {
              \(threadOriginatorColumn) AS thread_originator_guid
       FROM message m
       JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
+      JOIN chat c ON cmj.chat_id = c.ROWID
       LEFT JOIN handle h ON m.handle_id = h.ROWID
       WHERE cmj.chat_id = ?\(reactionFilter)
       """
@@ -101,14 +105,15 @@ extension MessageStore {
       date: 4,
       isFromMe: 5,
       service: 6,
-      isAudioMessage: 7,
-      destinationCallerID: 8,
-      guid: 9,
-      associatedGUID: 10,
-      associatedType: 11,
-      attachments: 12,
-      body: 13,
-      threadOriginatorGUID: 14
+      chatStyle: 7,
+      isAudioMessage: 8,
+      destinationCallerID: 9,
+      guid: 10,
+      associatedGUID: 11,
+      associatedType: 12,
+      attachments: 13,
+      body: 14,
+      threadOriginatorGUID: 15
     )
 
     return try withConnection { db in
@@ -128,6 +133,7 @@ extension MessageStore {
             date: decoded.date,
             isFromMe: decoded.isFromMe,
             service: decoded.service,
+            isGroup: decoded.isGroup,
             handleID: decoded.handleID,
             attachmentsCount: decoded.attachments,
             guid: decoded.guid,
@@ -182,6 +188,7 @@ extension MessageStore {
     }
     var sql = """
       SELECT m.ROWID, cmj.chat_id, m.handle_id, h.id, IFNULL(m.text, '') AS text, m.date, m.is_from_me, m.service,
+             c.style AS chat_style,
              \(audioMessageColumn) AS is_audio_message, \(destinationCallerColumn) AS destination_caller_id,
              \(guidColumn) AS guid, \(associatedGuidColumn) AS associated_guid, \(associatedTypeColumn) AS associated_type,
              (SELECT COUNT(*) FROM message_attachment_join maj WHERE maj.message_id = m.ROWID) AS attachments,
@@ -190,6 +197,7 @@ extension MessageStore {
              \(balloonBundleIDColumn) AS balloon_bundle_id
       FROM message m
       LEFT JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
+      LEFT JOIN chat c ON cmj.chat_id = c.ROWID
       LEFT JOIN handle h ON m.handle_id = h.ROWID
       WHERE m.ROWID > ?\(reactionFilter)
       """
@@ -209,17 +217,18 @@ extension MessageStore {
       date: 5,
       isFromMe: 6,
       service: 7,
-      isAudioMessage: 8,
-      destinationCallerID: 9,
-      guid: 10,
-      associatedGUID: 11,
-      associatedType: 12,
-      attachments: 13,
-      body: 14,
-      threadOriginatorGUID: 15
+      chatStyle: 8,
+      isAudioMessage: 9,
+      destinationCallerID: 10,
+      guid: 11,
+      associatedGUID: 12,
+      associatedType: 13,
+      attachments: 14,
+      body: 15,
+      threadOriginatorGUID: 16
     )
 
-    let balloonBundleIDIndex = 16
+    let balloonBundleIDIndex = 17
 
     return try withConnection { db in
       var messages: [Message] = []
@@ -260,6 +269,7 @@ extension MessageStore {
             date: decoded.date,
             isFromMe: decoded.isFromMe,
             service: decoded.service,
+            isGroup: decoded.isGroup,
             handleID: decoded.handleID,
             attachmentsCount: decoded.attachments,
             guid: decoded.guid,
@@ -295,6 +305,7 @@ extension MessageStore {
     let date = appleDate(from: int64Value(row[columns.date]))
     let isFromMe = boolValue(row[columns.isFromMe])
     let service = stringValue(row[columns.service])
+    let isGroup = intValue(row[columns.chatStyle]) == 43
     let isAudioMessage = boolValue(row[columns.isAudioMessage])
     let destinationCallerID = stringValue(row[columns.destinationCallerID])
     let guid = stringValue(row[columns.guid])
@@ -323,6 +334,7 @@ extension MessageStore {
       date: date,
       isFromMe: isFromMe,
       service: service,
+      isGroup: isGroup,
       destinationCallerID: destinationCallerID,
       guid: guid,
       associatedGUID: associatedGUID,

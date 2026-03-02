@@ -33,6 +33,8 @@ struct MessagePayload: Codable {
   let threadOriginatorGUID: String?
   let sender: String
   let isFromMe: Bool
+  /// Whether this message is from a group chat (chat.style == 43 in database)
+  let isGroup: Bool
   let text: String
   let createdAt: String
   let attachments: [AttachmentPayload]
@@ -57,6 +59,7 @@ struct MessagePayload: Codable {
     self.threadOriginatorGUID = message.threadOriginatorGUID
     self.sender = message.sender
     self.isFromMe = message.isFromMe
+    self.isGroup = message.isGroup
     self.text = message.text
     self.createdAt = CLIISO8601.format(message.date)
     self.attachments = attachments.map { AttachmentPayload(meta: $0) }
@@ -87,6 +90,7 @@ struct MessagePayload: Codable {
     case threadOriginatorGUID = "thread_originator_guid"
     case sender
     case isFromMe = "is_from_me"
+    case isGroup = "is_group"
     case text
     case createdAt = "created_at"
     case attachments

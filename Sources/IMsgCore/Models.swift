@@ -262,6 +262,7 @@ public struct Message: Sendable, Equatable {
   public let date: Date
   public let isFromMe: Bool
   public let service: String
+  public let isGroup: Bool
   public let handleID: Int64?
   public let attachmentsCount: Int
   /// The destination_caller_id from the database. For messages where is_from_me is true,
@@ -287,6 +288,7 @@ public struct Message: Sendable, Equatable {
     date: Date,
     isFromMe: Bool,
     service: String,
+    isGroup: Bool = false,
     handleID: Int64?,
     attachmentsCount: Int,
     guid: String = "",
@@ -303,6 +305,7 @@ public struct Message: Sendable, Equatable {
     self.date = date
     self.isFromMe = isFromMe
     self.service = service
+    self.isGroup = isGroup
     self.handleID = handleID
     self.attachmentsCount = attachmentsCount
     self.destinationCallerID = routing.destinationCallerID
@@ -320,6 +323,7 @@ public struct Message: Sendable, Equatable {
     date: Date,
     isFromMe: Bool,
     service: String,
+    isGroup: Bool = false,
     handleID: Int64?,
     attachmentsCount: Int,
     guid: String = "",
@@ -339,6 +343,7 @@ public struct Message: Sendable, Equatable {
       date: date,
       isFromMe: isFromMe,
       service: service,
+      isGroup: isGroup,
       handleID: handleID,
       attachmentsCount: attachmentsCount,
       guid: guid,
