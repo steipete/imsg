@@ -82,18 +82,27 @@ enum WatchCommand {
       includeReactions: includeReactions
     )
 
+    let resolver = ContactResolver()
     let stream = streamProvider(watcher, chatID, sinceRowID, config)
     for try await message in stream {
       if !filter.allows(message) {
         continue
       }
+      let resolvedName = resolver.resolve(message.sender)
+      let senderName = message.isFromMe ? "You" : (resolvedName ?? message.sender)
+
       if runtime.jsonOutput {
         let attachments = try store.attachments(for: message.rowID)
         let reactions = try store.reactions(for: message.rowID)
+        let reactionNames = resolver.resolve(reactions.map(\.sender))
+        var allResolved = reactionNames
+        if let resolvedName { allResolved[message.sender] = resolvedName }
         let payload = MessagePayload(
           message: message,
           attachments: attachments,
-          reactions: reactions
+          reactions: reactions,
+          senderDisplayName: resolvedName,
+          resolvedNames: allResolved
         )
         try StdoutWriter.writeJSONLine(payload)
         continue
@@ -104,11 +113,11 @@ enum WatchCommand {
         let action = (message.isReactionAdd ?? true) ? "added" : "removed"
         let targetGUID = message.reactedToGUID ?? "unknown"
         StdoutWriter.writeLine(
-          "\(timestamp) [\(direction)] \(message.sender) \(action) \(reactionType.emoji) reaction to \(targetGUID)"
+          "\(timestamp) [\(direction)] \(senderName) \(action) \(reactionType.emoji) reaction to \(targetGUID)"
         )
         continue
       }
-      StdoutWriter.writeLine("\(timestamp) [\(direction)] \(message.sender): \(message.text)")
+      StdoutWriter.writeLine("\(timestamp) [\(direction)] \(senderName): \(message.text)")
       if message.attachmentsCount > 0 {
         if showAttachments {
           let metas = try store.attachments(for: message.rowID)

@@ -15,6 +15,11 @@ extension RPCServer {
       let guid = info?.guid ?? ""
       let name = (info?.name.isEmpty == false ? info?.name : nil) ?? chat.name
       let service = info?.service ?? chat.service
+
+      let displayName = resolver.displayNameForChat(
+        identifier: identifier, name: name, participants: participants
+      )
+
       payloads.append(
         chatPayload(
           id: chat.id,
@@ -23,7 +28,8 @@ extension RPCServer {
           name: name,
           service: service,
           lastMessageAt: chat.lastMessageAt,
-          participants: participants
+          participants: participants,
+          displayName: displayName
         ))
     }
 
@@ -53,7 +59,8 @@ extension RPCServer {
         store: store,
         cache: cache,
         message: message,
-        includeAttachments: includeAttachments
+        includeAttachments: includeAttachments,
+        resolver: resolver
       )
       payloads.append(payload)
     }
@@ -85,6 +92,7 @@ extension RPCServer {
     let localSinceRowID = sinceRowID
     let localConfig = config
     let localIncludeAttachments = includeAttachments
+    let localResolver = resolver
     let task = Task {
       do {
         for try await message in localWatcher.stream(
@@ -98,7 +106,8 @@ extension RPCServer {
             store: localStore,
             cache: localCache,
             message: message,
-            includeAttachments: localIncludeAttachments
+            includeAttachments: localIncludeAttachments,
+            resolver: localResolver
           )
           localWriter.sendNotification(
             method: "message",
@@ -184,17 +193,25 @@ private func buildMessagePayload(
   store: MessageStore,
   cache: ChatCache,
   message: Message,
-  includeAttachments: Bool
+  includeAttachments: Bool,
+  resolver: ContactResolver
 ) async throws -> [String: Any] {
   let chatInfo = try await cache.info(chatID: message.chatID)
   let participants = try await cache.participants(chatID: message.chatID)
   let attachments = includeAttachments ? try store.attachments(for: message.rowID) : []
   let reactions = includeAttachments ? try store.reactions(for: message.rowID) : []
+  // Batch resolve message sender + all reaction senders
+  var allSenders = [message.sender]
+  allSenders.append(contentsOf: reactions.map(\.sender))
+  let resolvedNames = resolver.resolve(allSenders)
+
   return try messagePayload(
     message: message,
     chatInfo: chatInfo,
     participants: participants,
     attachments: attachments,
-    reactions: reactions
+    reactions: reactions,
+    senderDisplayName: resolvedNames[message.sender],
+    resolvedNames: resolvedNames
   )
 }

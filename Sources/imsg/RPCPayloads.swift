@@ -8,9 +8,10 @@ func chatPayload(
   name: String,
   service: String,
   lastMessageAt: Date,
-  participants: [String]
+  participants: [String],
+  displayName: String? = nil
 ) -> [String: Any] {
-  return [
+  var dict: [String: Any] = [
     "id": id,
     "identifier": identifier,
     "guid": guid,
@@ -20,6 +21,10 @@ func chatPayload(
     "participants": participants,
     "is_group": isGroupHandle(identifier: identifier, guid: guid),
   ]
+  if let displayName {
+    dict["display_name"] = displayName
+  }
+  return dict
 }
 
 func messagePayload(
@@ -27,12 +32,20 @@ func messagePayload(
   chatInfo: ChatInfo?,
   participants: [String],
   attachments: [AttachmentMeta],
-  reactions: [Reaction]
+  reactions: [Reaction],
+  senderDisplayName: String? = nil,
+  resolvedNames: [String: String] = [:]
 ) throws -> [String: Any] {
   let identifier = chatInfo?.identifier ?? ""
   let guid = chatInfo?.guid ?? ""
   let name = chatInfo?.name ?? ""
-  let core = MessagePayload(message: message, attachments: attachments, reactions: reactions)
+  let core = MessagePayload(
+    message: message,
+    attachments: attachments,
+    reactions: reactions,
+    senderDisplayName: senderDisplayName,
+    resolvedNames: resolvedNames
+  )
   var payload = try core.asDictionary()
   payload["chat_identifier"] = identifier
   payload["chat_guid"] = guid
@@ -55,8 +68,8 @@ func attachmentPayload(_ meta: AttachmentMeta) -> [String: Any] {
   ]
 }
 
-func reactionPayload(_ reaction: Reaction) -> [String: Any] {
-  return [
+func reactionPayload(_ reaction: Reaction, senderDisplayName: String? = nil) -> [String: Any] {
+  var dict: [String: Any] = [
     "id": reaction.rowID,
     "type": reaction.reactionType.name,
     "emoji": reaction.reactionType.emoji,
@@ -64,6 +77,10 @@ func reactionPayload(_ reaction: Reaction) -> [String: Any] {
     "is_from_me": reaction.isFromMe,
     "created_at": CLIISO8601.format(reaction.date),
   ]
+  if let senderDisplayName {
+    dict["sender_display_name"] = senderDisplayName
+  }
+  return dict
 }
 
 func isGroupHandle(identifier: String, guid: String) -> Bool {
