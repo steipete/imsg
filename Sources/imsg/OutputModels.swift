@@ -189,6 +189,34 @@ struct AttachmentPayload: Codable {
   }
 }
 
+struct ParticipantPayload: Codable {
+  let identifier: String
+  let displayName: String?
+
+  enum CodingKeys: String, CodingKey {
+    case identifier
+    case displayName = "display_name"
+  }
+}
+
+struct ParticipantsResponse: Codable {
+  let chatID: Int64
+  let identifier: String
+  let displayName: String?
+  let service: String
+  let isGroup: Bool
+  let participants: [ParticipantPayload]
+
+  enum CodingKeys: String, CodingKey {
+    case chatID = "chat_id"
+    case identifier
+    case displayName = "display_name"
+    case service
+    case isGroup = "is_group"
+    case participants
+  }
+}
+
 enum CLIISO8601 {
   static func format(_ date: Date) -> String {
     let formatter = ISO8601DateFormatter()

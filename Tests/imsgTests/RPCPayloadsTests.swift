@@ -179,6 +179,48 @@ func messagePayloadIncludesSenderDisplayName() throws {
 }
 
 @Test
+func participantsResponseEncodesSnakeCaseKeys() throws {
+  let response = ParticipantsResponse(
+    chatID: 42,
+    identifier: "iMessage;+;chat123",
+    displayName: "Family Chat",
+    service: "iMessage",
+    isGroup: true,
+    participants: [
+      ParticipantPayload(identifier: "+15551234567", displayName: "Mom"),
+      ParticipantPayload(identifier: "+15559999999", displayName: nil),
+    ]
+  )
+  let data = try JSONEncoder().encode(response)
+  let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+
+  // Verify snake_case keys
+  #expect(json["chat_id"] as? Int64 == 42)
+  #expect(json["display_name"] as? String == "Family Chat")
+  #expect(json["is_group"] as? Bool == true)
+  #expect(json["service"] as? String == "iMessage")
+
+  let participants = json["participants"] as! [[String: Any]]
+  #expect(participants.count == 2)
+  #expect(participants[0]["identifier"] as? String == "+15551234567")
+  #expect(participants[0]["display_name"] as? String == "Mom")
+  #expect(participants[1]["identifier"] as? String == "+15559999999")
+  // Null display_name: Swift's JSONEncoder omits nil optionals
+  #expect(participants[1]["display_name"] as? String == nil)
+  #expect(!participants[1].keys.contains("display_name"))
+}
+
+@Test
+func participantPayloadOmitsNilDisplayName() throws {
+  let payload = ParticipantPayload(identifier: "+15559999999", displayName: nil)
+  let data = try JSONEncoder().encode(payload)
+  let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+  #expect(json["identifier"] as? String == "+15559999999")
+  // Swift's JSONEncoder omits nil optionals — key not present
+  #expect(!json.keys.contains("display_name"))
+}
+
+@Test
 func paramParsingHelpers() {
   #expect(stringParam(123 as NSNumber) == "123")
   #expect(intParam("42") == 42)

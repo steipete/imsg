@@ -240,3 +240,107 @@ func watchCommandFlushesJsonOutput() async throws {
   }
   #expect(output.contains("\"text\":\"hello\""))
 }
+
+@Test
+func watchCommandShowsGroupLabelWhenWatchingAll() async throws {
+  let values = ParsedValues(
+    positional: [],
+    options: ["db": ["/tmp/unused"], "debounce": ["1ms"]],
+    flags: []
+  )
+  let runtime = RuntimeOptions(parsedValues: values)
+  let store = try CommandTestDatabase.makeStoreForRPC()
+  let message = Message(
+    rowID: 10,
+    chatID: 1,
+    sender: "+123",
+    text: "group msg",
+    date: Date(),
+    isFromMe: false,
+    service: "iMessage",
+    handleID: nil,
+    attachmentsCount: 0
+  )
+
+  let (output, _) = try await StdoutCapture.capture {
+    try await WatchCommand.run(
+      values: values,
+      runtime: runtime,
+      storeFactory: { _ in store },
+      streamProvider: singleMessageStreamProvider(message)
+    )
+  }
+  // Group chat message should show group name in parentheses
+  #expect(output.contains("(Group Chat)"))
+  #expect(output.contains("group msg"))
+}
+
+@Test
+func watchCommandNoGroupLabelWhenScopedToChat() async throws {
+  let values = ParsedValues(
+    positional: [],
+    options: ["chatID": ["1"], "db": ["/tmp/unused"], "debounce": ["1ms"]],
+    flags: []
+  )
+  let runtime = RuntimeOptions(parsedValues: values)
+  let store = try CommandTestDatabase.makeStoreForRPC()
+  let message = Message(
+    rowID: 10,
+    chatID: 1,
+    sender: "+123",
+    text: "scoped msg",
+    date: Date(),
+    isFromMe: false,
+    service: "iMessage",
+    handleID: nil,
+    attachmentsCount: 0
+  )
+
+  let (output, _) = try await StdoutCapture.capture {
+    try await WatchCommand.run(
+      values: values,
+      runtime: runtime,
+      storeFactory: { _ in store },
+      streamProvider: singleMessageStreamProvider(message)
+    )
+  }
+  // Scoped watch should NOT show group label
+  #expect(!output.contains("(Group Chat)"))
+  #expect(output.contains("scoped msg"))
+}
+
+@Test
+func watchCommandNoLabelFor1on1WhenWatchingAll() async throws {
+  let values = ParsedValues(
+    positional: [],
+    options: ["db": ["/tmp/unused"], "debounce": ["1ms"]],
+    flags: []
+  )
+  let runtime = RuntimeOptions(parsedValues: values)
+  let store = try CommandTestDatabase.makeStoreFor1on1()
+  let message = Message(
+    rowID: 10,
+    chatID: 1,
+    sender: "+15551234567",
+    text: "direct msg",
+    date: Date(),
+    isFromMe: false,
+    service: "iMessage",
+    handleID: nil,
+    attachmentsCount: 0
+  )
+
+  let (output, _) = try await StdoutCapture.capture {
+    try await WatchCommand.run(
+      values: values,
+      runtime: runtime,
+      storeFactory: { _ in store },
+      streamProvider: singleMessageStreamProvider(message)
+    )
+  }
+  // 1:1 messages should NOT have parenthetical group label even when watching all chats
+  #expect(!output.contains("("))
+  #expect(!output.contains(")"))
+  #expect(output.contains("direct msg"))
+  #expect(output.contains("+15551234567"))
+}

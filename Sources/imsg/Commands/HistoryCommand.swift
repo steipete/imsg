@@ -53,6 +53,38 @@ enum HistoryCommand {
     let uniqueSenders = Array(Set(filtered.map(\.sender)))
     let resolvedNames = resolver.resolve(uniqueSenders)
 
+    // Print header (CLI only)
+    if !runtime.jsonOutput {
+      let chatInfo = try store.chatInfo(chatID: chatID)
+      let participantHandles = try store.participants(chatID: chatID)
+      let identifier = chatInfo?.identifier ?? ""
+      let guid = chatInfo?.guid ?? ""
+      let dbName = chatInfo?.name ?? ""
+      let service = chatInfo?.service ?? ""
+      let isGroup = isGroupHandle(identifier: identifier, guid: guid)
+      let displayName = resolver.displayNameForChat(
+        identifier: identifier, name: dbName, participants: participantHandles
+      )
+
+      if isGroup {
+        StdoutWriter.writeLine("\(displayName) \u{00B7} \(service)")
+        // Show participant list only if we have a DB name (otherwise displayName IS the participants)
+        if !dbName.isEmpty {
+          let resolved = resolver.resolve(participantHandles)
+          let names = participantHandles.map { resolved[$0] ?? $0 }
+          StdoutWriter.writeLine("  \(names.joined(separator: ", "))")
+        }
+      } else {
+        let resolvedChat = resolver.resolve(identifier)
+        if let resolvedChat, resolvedChat != identifier {
+          StdoutWriter.writeLine("Chat with \(resolvedChat) (\(identifier)) \u{00B7} \(service)")
+        } else {
+          StdoutWriter.writeLine("Chat with \(displayName) \u{00B7} \(service)")
+        }
+      }
+      StdoutWriter.writeLine(String(repeating: "\u{2500}", count: 49))
+    }
+
     for message in filtered {
       let senderName = message.isFromMe
         ? "You"

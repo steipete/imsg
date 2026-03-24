@@ -287,3 +287,50 @@ func rpcWatchUnsubscribeRequiresSubscription() async throws {
   let error = output.errors.first?["error"] as? [String: Any]
   #expect(int64Value(error?["code"]) == -32602)
 }
+
+@Test
+func rpcParticipantsListReturnsParticipants() async throws {
+  let store = try CommandTestDatabase.makeStoreForRPC()
+  let output = TestRPCOutput()
+  let server = RPCServer(store: store, verbose: false, output: output)
+
+  let line =
+    #"{"jsonrpc":"2.0","id":"p1","method":"participants.list","params":{"chat_id":1}}"#
+  await server.handleLineForTesting(line)
+
+  #expect(output.responses.count == 1)
+  let result = output.responses[0]["result"] as? [String: Any]
+  #expect(int64Value(result?["chat_id"]) == 1)
+  #expect(result?["is_group"] as? Bool == true)
+  #expect(result?["display_name"] as? String == "Group Chat")
+  let participants = result?["participants"] as? [[String: Any?]] ?? []
+  #expect(participants.count == 2)
+}
+
+@Test
+func rpcParticipantsListRequiresChatID() async throws {
+  let store = try CommandTestDatabase.makeStoreForRPC()
+  let output = TestRPCOutput()
+  let server = RPCServer(store: store, verbose: false, output: output)
+
+  let line = #"{"jsonrpc":"2.0","id":"p2","method":"participants.list","params":{}}"#
+  await server.handleLineForTesting(line)
+
+  let error = output.errors.first?["error"] as? [String: Any]
+  #expect(int64Value(error?["code"]) == -32602)
+}
+
+@Test
+func rpcParticipantsListRejectsNonexistentChat() async throws {
+  let store = try CommandTestDatabase.makeStoreForRPC()
+  let output = TestRPCOutput()
+  let server = RPCServer(store: store, verbose: false, output: output)
+
+  let line =
+    #"{"jsonrpc":"2.0","id":"p3","method":"participants.list","params":{"chat_id":999}}"#
+  await server.handleLineForTesting(line)
+
+  #expect(output.errors.count == 1)
+  let error2 = output.errors.first?["error"] as? [String: Any]
+  #expect(int64Value(error2?["code"]) == -32602)
+}

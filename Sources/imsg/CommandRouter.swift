@@ -12,6 +12,7 @@ struct CommandRouter {
     self.specs = [
       ChatsCommand.spec,
       HistoryCommand.spec,
+      ParticipantsCommand.spec,
       WatchCommand.spec,
       SendCommand.spec,
       ReactCommand.spec,

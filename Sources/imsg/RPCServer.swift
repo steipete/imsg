@@ -82,6 +82,8 @@ final class RPCServer {
       switch method {
       case "chats.list":
         try await handleChatsList(id: id, params: params)
+      case "participants.list":
+        try await handleParticipantsList(id: id, params: params)
       case "messages.history":
         try await handleMessagesHistory(id: id, params: params)
       case "watch.subscribe":

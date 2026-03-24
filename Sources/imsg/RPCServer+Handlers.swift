@@ -36,6 +36,34 @@ extension RPCServer {
     respond(id: id, result: ["chats": payloads])
   }
 
+  func handleParticipantsList(id: Any?, params: [String: Any]) async throws {
+    guard let chatID = int64Param(params["chat_id"]) else {
+      throw RPCError.invalidParams("chat_id is required")
+    }
+    guard let info = try await cache.info(chatID: chatID) else {
+      throw RPCError.invalidParams("no chat found with id \(chatID)")
+    }
+    let participantHandles = try await cache.participants(chatID: chatID)
+    let resolved = resolver.resolve(participantHandles)
+    let isGroup = isGroupHandle(identifier: info.identifier, guid: info.guid)
+    let displayName = resolver.displayNameForChat(
+      identifier: info.identifier, name: info.name, participants: participantHandles
+    )
+
+    let participants: [[String: Any?]] = participantHandles.map { handle in
+      ["identifier": handle, "display_name": resolved[handle]]
+    }
+
+    respond(id: id, result: [
+      "chat_id": chatID,
+      "identifier": info.identifier,
+      "display_name": displayName,
+      "service": info.service,
+      "is_group": isGroup,
+      "participants": participants,
+    ] as [String: Any])
+  }
+
   func handleMessagesHistory(id: Any?, params: [String: Any]) async throws {
     guard let chatID = int64Param(params["chat_id"]) else {
       throw RPCError.invalidParams("chat_id is required")

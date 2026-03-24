@@ -12,7 +12,7 @@ enum CommandTestDatabase {
   static func makePath() throws -> String {
     let path = try makeDatabasePath()
     let db = try Connection(path)
-    try createSchema(db, includeChatHandleJoin: false)
+    try createSchema(db, includeChatHandleJoin: true)
     try seedBasicChat(db)
     return path
   }
@@ -28,6 +28,36 @@ enum CommandTestDatabase {
     )
     try db.run("INSERT INTO message_attachment_join(message_id, attachment_id) VALUES (1, 1)")
     return path
+  }
+
+  static func makePathWithParticipants() throws -> String {
+    let path = try makeDatabasePath()
+    let db = try Connection(path)
+    try createSchema(db, includeChatHandleJoin: true)
+    try seedRPCChat(db)
+    return path
+  }
+
+  /// Creates a file-based DB with a 1:1 chat (non-group identifier/guid) and one participant.
+  static func makePathWith1on1Chat() throws -> String {
+    let path = try makeDatabasePath()
+    let db = try Connection(path)
+    try createSchema(db, includeChatHandleJoin: true)
+    try seed1on1Chat(db)
+    return path
+  }
+
+  /// Creates an in-memory store with a 1:1 chat for use in watch/RPC tests.
+  static func makeStoreFor1on1() throws -> MessageStore {
+    let db = try Connection(.inMemory)
+    try createSchema(db, includeChatHandleJoin: true)
+    try seed1on1Chat(db)
+    return try MessageStore(
+      connection: db,
+      path: ":memory:",
+      hasAttributedBody: false,
+      hasReactionColumns: false
+    )
   }
 
   static func makeStoreForRPC() throws -> MessageStore {
@@ -107,6 +137,26 @@ enum CommandTestDatabase {
       """
       INSERT INTO message(ROWID, handle_id, text, date, is_from_me, service)
       VALUES (1, 1, 'hello', ?, 0, 'iMessage')
+      """,
+      appleEpoch(now)
+    )
+    try db.run("INSERT INTO chat_message_join(chat_id, message_id) VALUES (1, 1)")
+  }
+
+  private static func seed1on1Chat(_ db: Connection) throws {
+    let now = Date()
+    try db.run(
+      """
+      INSERT INTO chat(ROWID, chat_identifier, guid, display_name, service_name)
+      VALUES (1, '+15551234567', 'iMessage;-;+15551234567', '', 'iMessage')
+      """
+    )
+    try db.run("INSERT INTO handle(ROWID, id) VALUES (1, '+15551234567')")
+    try db.run("INSERT INTO chat_handle_join(chat_id, handle_id) VALUES (1, 1)")
+    try db.run(
+      """
+      INSERT INTO message(ROWID, handle_id, text, date, is_from_me, service)
+      VALUES (1, 1, 'hey there', ?, 0, 'iMessage')
       """,
       appleEpoch(now)
     )
