@@ -15,6 +15,9 @@ extension RPCServer {
       let guid = info?.guid ?? ""
       let name = (info?.name.isEmpty == false ? info?.name : nil) ?? chat.name
       let service = info?.service ?? chat.service
+      let isGroup = isGroupHandle(identifier: identifier, guid: guid)
+      let needsResolve = !isGroup && (name.isEmpty || name == identifier)
+      let contactName = needsResolve ? contactResolver.displayName(for: identifier) : nil
       payloads.append(
         chatPayload(
           id: chat.id,
@@ -23,7 +26,8 @@ extension RPCServer {
           name: name,
           service: service,
           lastMessageAt: chat.lastMessageAt,
-          participants: participants
+          participants: participants,
+          contactName: contactName
         ))
     }
 
@@ -53,7 +57,8 @@ extension RPCServer {
         store: store,
         cache: cache,
         message: message,
-        includeAttachments: includeAttachments
+        includeAttachments: includeAttachments,
+        contactResolver: contactResolver
       )
       payloads.append(payload)
     }
@@ -85,6 +90,7 @@ extension RPCServer {
     let localSinceRowID = sinceRowID
     let localConfig = config
     let localIncludeAttachments = includeAttachments
+    let localContactResolver = contactResolver
     let task = Task {
       do {
         for try await message in localWatcher.stream(
@@ -98,7 +104,8 @@ extension RPCServer {
             store: localStore,
             cache: localCache,
             message: message,
-            includeAttachments: localIncludeAttachments
+            includeAttachments: localIncludeAttachments,
+            contactResolver: localContactResolver
           )
           localWriter.sendNotification(
             method: "message",
@@ -138,8 +145,18 @@ extension RPCServer {
     }
     let region = stringParam(params["region"]) ?? "US"
 
+    let rawRecipient = stringParam(params["to"]) ?? ""
+    let resolvedRecipient: String
+    do {
+      resolvedRecipient =
+        rawRecipient.isEmpty
+        ? rawRecipient
+        : try ChatTargetResolver.resolveRecipientName(rawRecipient, contacts: contactResolver)
+    } catch {
+      throw RPCError.invalidParams(error.localizedDescription)
+    }
     let input = ChatTargetInput(
-      recipient: stringParam(params["to"]) ?? "",
+      recipient: resolvedRecipient,
       chatID: int64Param(params["chat_id"]),
       chatIdentifier: stringParam(params["chat_identifier"]) ?? "",
       chatGUID: stringParam(params["chat_guid"]) ?? ""
@@ -184,17 +201,27 @@ private func buildMessagePayload(
   store: MessageStore,
   cache: ChatCache,
   message: Message,
-  includeAttachments: Bool
+  includeAttachments: Bool,
+  contactResolver: any ContactResolving = NoOpContactResolver()
 ) async throws -> [String: Any] {
   let chatInfo = try await cache.info(chatID: message.chatID)
   let participants = try await cache.participants(chatID: message.chatID)
   let attachments = includeAttachments ? try store.attachments(for: message.rowID) : []
   let reactions = includeAttachments ? try store.reactions(for: message.rowID) : []
+  let senderName = message.isFromMe ? nil : contactResolver.displayName(for: message.sender)
+  var reactionNames: [Int64: String] = [:]
+  for reaction in reactions where !reaction.isFromMe {
+    if let name = contactResolver.displayName(for: reaction.sender) {
+      reactionNames[reaction.rowID] = name
+    }
+  }
   return try messagePayload(
     message: message,
     chatInfo: chatInfo,
     participants: participants,
     attachments: attachments,
-    reactions: reactions
+    reactions: reactions,
+    senderName: senderName,
+    reactionSenderNames: reactionNames
   )
 }

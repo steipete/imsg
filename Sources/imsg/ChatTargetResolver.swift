@@ -1,3 +1,4 @@
+import Foundation
 import IMsgCore
 
 struct ChatTargetInput: Sendable {
@@ -56,5 +57,38 @@ enum ChatTargetResolver {
       chatIdentifier: resolvedIdentifier,
       chatGUID: resolvedGUID
     )
+  }
+
+  /// Checks if a recipient string looks like a contact name rather than a phone/email.
+  static func looksLikeName(_ recipient: String) -> Bool {
+    if recipient.isEmpty { return false }
+    if recipient.contains("@") { return false }
+    if recipient.hasPrefix("+") { return false }
+    if recipient.allSatisfy({ $0.isNumber || $0 == "-" || $0 == "(" || $0 == ")" || $0 == " " }) {
+      return false
+    }
+    return true
+  }
+
+  /// Resolves a contact name to a phone number or email.
+  /// Returns the original recipient if it doesn't look like a name.
+  /// Throws if multiple contacts match the name.
+  static func resolveRecipientName(
+    _ recipient: String,
+    contacts: any ContactResolving
+  ) throws -> String {
+    guard looksLikeName(recipient) else { return recipient }
+    let matches = contacts.searchByName(recipient)
+    switch matches.count {
+    case 0:
+      return recipient
+    case 1:
+      return matches[0].handle
+    default:
+      let list = matches.map { "  \($0.name): \($0.handle)" }.joined(separator: "\n")
+      throw IMsgError.invalidChatTarget(
+        "Multiple contacts match \"\(recipient)\":\n\(list)\nSpecify a phone number or email instead."
+      )
+    }
   }
 }

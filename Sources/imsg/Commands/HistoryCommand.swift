@@ -46,16 +46,26 @@ enum HistoryCommand {
     )
 
     let store = try MessageStore(path: dbPath)
+    let contacts = await ContactResolver.create()
     let filtered = try store.messages(chatID: chatID, limit: limit, filter: filter)
 
     if runtime.jsonOutput {
       for message in filtered {
         let attachments = try store.attachments(for: message.rowID)
         let reactions = try store.reactions(for: message.rowID)
+        let senderName = message.isFromMe ? nil : contacts.displayName(for: message.sender)
+        var reactionNames: [Int64: String] = [:]
+        for reaction in reactions where !reaction.isFromMe {
+          if let name = contacts.displayName(for: reaction.sender) {
+            reactionNames[reaction.rowID] = name
+          }
+        }
         let payload = MessagePayload(
           message: message,
           attachments: attachments,
-          reactions: reactions
+          reactions: reactions,
+          senderName: senderName,
+          reactionSenderNames: reactionNames
         )
         try StdoutWriter.writeJSONLine(payload)
       }
@@ -65,7 +75,15 @@ enum HistoryCommand {
     for message in filtered {
       let direction = message.isFromMe ? "sent" : "recv"
       let timestamp = CLIISO8601.format(message.date)
-      StdoutWriter.writeLine("\(timestamp) [\(direction)] \(message.sender): \(message.text)")
+      let senderDisplay: String
+      if message.isFromMe {
+        senderDisplay = message.sender
+      } else if let name = contacts.displayName(for: message.sender) {
+        senderDisplay = name
+      } else {
+        senderDisplay = message.sender
+      }
+      StdoutWriter.writeLine("\(timestamp) [\(direction)] \(senderDisplay): \(message.text)")
       if message.attachmentsCount > 0 {
         if showAttachments {
           let metas = try store.attachments(for: message.rowID)

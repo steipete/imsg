@@ -22,18 +22,20 @@ enum ChatsCommand {
     let dbPath = values.option("db") ?? MessageStore.defaultPath
     let limit = values.optionInt("limit") ?? 20
     let store = try MessageStore(path: dbPath)
+    let contacts = await ContactResolver.create()
     let chats = try store.listChats(limit: limit)
 
-    if runtime.jsonOutput {
-      for chat in chats {
-        try StdoutWriter.writeJSONLine(ChatPayload(chat: chat))
-      }
-      return
-    }
-
     for chat in chats {
-      let last = CLIISO8601.format(chat.lastMessageAt)
-      StdoutWriter.writeLine("[\(chat.id)] \(chat.name) (\(chat.identifier)) last=\(last)")
+      let needsResolve = chat.name.isEmpty || chat.name == chat.identifier
+      let contactName = needsResolve ? contacts.displayName(for: chat.identifier) : nil
+
+      if runtime.jsonOutput {
+        try StdoutWriter.writeJSONLine(ChatPayload(chat: chat, contactName: contactName))
+      } else {
+        let last = CLIISO8601.format(chat.lastMessageAt)
+        let displayName = contactName ?? (chat.name.isEmpty ? chat.identifier : chat.name)
+        StdoutWriter.writeLine("[\(chat.id)] \(displayName) (\(chat.identifier)) last=\(last)")
+      }
     }
   }
 }

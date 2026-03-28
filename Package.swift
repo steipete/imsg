@@ -22,6 +22,7 @@ let package = Package(
             ],
             linkerSettings: [
                 .linkedFramework("ScriptingBridge"),
+                .linkedFramework("Contacts"),
             ]
         ),
     .executableTarget(

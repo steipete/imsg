@@ -75,6 +75,7 @@ enum WatchCommand {
     )
 
     let store = try storeFactory(dbPath)
+    let contacts = await ContactResolver.create()
     let watcher = MessageWatcher(store: store)
     let config = MessageWatcherConfiguration(
       debounceInterval: debounceInterval,
@@ -87,28 +88,38 @@ enum WatchCommand {
       if !filter.allows(message) {
         continue
       }
+      let senderName = message.isFromMe ? nil : contacts.displayName(for: message.sender)
       if runtime.jsonOutput {
         let attachments = try store.attachments(for: message.rowID)
         let reactions = try store.reactions(for: message.rowID)
+        var reactionNames: [Int64: String] = [:]
+        for reaction in reactions where !reaction.isFromMe {
+          if let name = contacts.displayName(for: reaction.sender) {
+            reactionNames[reaction.rowID] = name
+          }
+        }
         let payload = MessagePayload(
           message: message,
           attachments: attachments,
-          reactions: reactions
+          reactions: reactions,
+          senderName: senderName,
+          reactionSenderNames: reactionNames
         )
         try StdoutWriter.writeJSONLine(payload)
         continue
       }
       let direction = message.isFromMe ? "sent" : "recv"
       let timestamp = CLIISO8601.format(message.date)
+      let senderDisplay = senderName ?? message.sender
       if message.isReaction, let reactionType = message.reactionType {
         let action = (message.isReactionAdd ?? true) ? "added" : "removed"
         let targetGUID = message.reactedToGUID ?? "unknown"
         StdoutWriter.writeLine(
-          "\(timestamp) [\(direction)] \(message.sender) \(action) \(reactionType.emoji) reaction to \(targetGUID)"
+          "\(timestamp) [\(direction)] \(senderDisplay) \(action) \(reactionType.emoji) reaction to \(targetGUID)"
         )
         continue
       }
-      StdoutWriter.writeLine("\(timestamp) [\(direction)] \(message.sender): \(message.text)")
+      StdoutWriter.writeLine("\(timestamp) [\(direction)] \(senderDisplay): \(message.text)")
       if message.attachmentsCount > 0 {
         if showAttachments {
           let metas = try store.attachments(for: message.rowID)

@@ -15,12 +15,14 @@ final class RPCServer {
   let subscriptions = SubscriptionStore()
   let verbose: Bool
   let sendMessage: (MessageSendOptions) throws -> Void
+  let contactResolver: any ContactResolving
 
   init(
     store: MessageStore,
     verbose: Bool,
     output: RPCOutput = RPCWriter(),
-    sendMessage: @escaping (MessageSendOptions) throws -> Void = { try MessageSender().send($0) }
+    sendMessage: @escaping (MessageSendOptions) throws -> Void = { try MessageSender().send($0) },
+    contactResolver: any ContactResolving = NoOpContactResolver()
   ) {
     self.store = store
     self.watcher = MessageWatcher(store: store)
@@ -28,6 +30,7 @@ final class RPCServer {
     self.verbose = verbose
     self.output = output
     self.sendMessage = sendMessage
+    self.contactResolver = contactResolver
   }
 
   func run() async throws {

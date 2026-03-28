@@ -16,5 +16,7 @@
   <string>0.5.0</string>
   <key>NSAppleEventsUsageDescription</key>
   <string>Send messages via Messages.app.</string>
+  <key>NSContactsUsageDescription</key>
+  <string>Resolve phone numbers and emails to contact names.</string>
 </dict>
 </plist>

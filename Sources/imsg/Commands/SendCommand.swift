@@ -42,8 +42,17 @@ enum SendCommand {
     storeFactory: @escaping (String) throws -> MessageStore = { try MessageStore(path: $0) }
   ) async throws {
     let dbPath = values.option("db") ?? MessageStore.defaultPath
+    let rawRecipient = values.option("to") ?? ""
+    let resolvedRecipient: String
+    if !rawRecipient.isEmpty && ChatTargetResolver.looksLikeName(rawRecipient) {
+      let contacts = await ContactResolver.create()
+      resolvedRecipient = try ChatTargetResolver.resolveRecipientName(
+        rawRecipient, contacts: contacts)
+    } else {
+      resolvedRecipient = rawRecipient
+    }
     let input = ChatTargetInput(
-      recipient: values.option("to") ?? "",
+      recipient: resolvedRecipient,
       chatID: values.optionInt64("chatID"),
       chatIdentifier: values.option("chatIdentifier") ?? "",
       chatGUID: values.option("chatGUID") ?? ""
