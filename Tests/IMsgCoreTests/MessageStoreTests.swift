@@ -388,6 +388,17 @@ func attachmentsByMessageReturnsMetadata() throws {
 }
 
 @Test
+func attachmentsByMessagesReturnsMetadataByMessageID() throws {
+  let store = try TestDatabase.makeStore()
+  let attachmentsByMessageID = try store.attachments(for: [1, 2, 3])
+
+  #expect(attachmentsByMessageID[1]?.isEmpty != false)
+  #expect(attachmentsByMessageID[2]?.count == 1)
+  #expect(attachmentsByMessageID[2]?.first?.mimeType == "application/octet-stream")
+  #expect(attachmentsByMessageID[3]?.isEmpty != false)
+}
+
+@Test
 func longRepeatedPatternMessage() throws {
   // Test the exact pattern that causes crashes: repeated "aaaaaaaaaaaa " pattern
   // This reproduces the UInt8 overflow bug when segment.count > 256

@@ -138,6 +138,71 @@ func reactionsForMessageReturnsReactions() throws {
 }
 
 @Test
+func bulkReactionsForMessagesGroupsByMessageID() throws {
+  let db = try ReactionTestDatabase.makeConnection()
+  let now = Date()
+  try ReactionTestDatabase.seedBaseMessage(db, now: now)
+  try db.run(
+    """
+    INSERT INTO message(ROWID, handle_id, text, guid, associated_message_guid, associated_message_type, date, is_from_me, service)
+    VALUES (10, 2, 'Second message', 'msg-guid-2', NULL, 0, ?, 0, 'iMessage')
+    """,
+    ReactionTestDatabase.appleEpoch(now.addingTimeInterval(-550))
+  )
+  try db.run("INSERT INTO chat_message_join(chat_id, message_id) VALUES (1, 10)")
+
+  try db.run(
+    """
+    INSERT INTO message(ROWID, handle_id, text, guid, associated_message_guid, associated_message_type, date, is_from_me, service)
+    VALUES (2, 2, '', 'reaction-guid-1', 'p:0/msg-guid-1', 2000, ?, 0, 'iMessage')
+    """,
+    ReactionTestDatabase.appleEpoch(now.addingTimeInterval(-500))
+  )
+  try db.run("INSERT INTO chat_message_join(chat_id, message_id) VALUES (1, 2)")
+
+  try db.run(
+    """
+    INSERT INTO message(ROWID, handle_id, text, guid, associated_message_guid, associated_message_type, date, is_from_me, service)
+    VALUES (3, 1, '', 'reaction-guid-2', 'msg-guid-2', 2001, ?, 1, 'iMessage')
+    """,
+    ReactionTestDatabase.appleEpoch(now.addingTimeInterval(-450))
+  )
+  try db.run("INSERT INTO chat_message_join(chat_id, message_id) VALUES (1, 3)")
+
+  let store = try MessageStore(connection: db, path: ":memory:")
+  let messages = try store.messages(chatID: 1, limit: 10)
+  let reactionsByMessageID = try store.reactions(for: messages)
+
+  #expect(reactionsByMessageID[1]?.count == 1)
+  #expect(reactionsByMessageID[1]?.first?.reactionType == .love)
+  #expect(reactionsByMessageID[10]?.count == 1)
+  #expect(reactionsByMessageID[10]?.first?.reactionType == .like)
+  #expect(reactionsByMessageID[10]?.first?.isFromMe == true)
+}
+
+@Test
+func bulkReactionsIncludeRowsWithoutChatJoin() throws {
+  let db = try ReactionTestDatabase.makeConnection()
+  let now = Date()
+  try ReactionTestDatabase.seedBaseMessage(db, now: now)
+
+  try db.run(
+    """
+    INSERT INTO message(ROWID, handle_id, text, guid, associated_message_guid, associated_message_type, date, is_from_me, service)
+    VALUES (2, 2, '', 'reaction-guid-1', 'p:0/msg-guid-1', 2000, ?, 0, 'iMessage')
+    """,
+    ReactionTestDatabase.appleEpoch(now.addingTimeInterval(-500))
+  )
+
+  let store = try MessageStore(connection: db, path: ":memory:")
+  let messages = try store.messages(chatID: 1, limit: 10)
+  let reactionsByMessageID = try store.reactions(for: messages)
+
+  #expect(reactionsByMessageID[1]?.count == 1)
+  #expect(reactionsByMessageID[1]?.first?.reactionType == .love)
+}
+
+@Test
 func reactionsForMessageWithNoReactionsReturnsEmpty() throws {
   let db = try ReactionTestDatabase.makeConnection()
   let now = Date()

@@ -49,9 +49,12 @@ enum HistoryCommand {
     let filtered = try store.messages(chatID: chatID, limit: limit, filter: filter)
 
     if runtime.jsonOutput {
+      let attachmentsByMessageID = try store.attachments(for: filtered.map(\.rowID))
+      let reactionsByMessageID = try store.reactions(for: filtered)
+
       for message in filtered {
-        let attachments = try store.attachments(for: message.rowID)
-        let reactions = try store.reactions(for: message.rowID)
+        let attachments = attachmentsByMessageID[message.rowID] ?? []
+        let reactions = reactionsByMessageID[message.rowID] ?? []
         let payload = MessagePayload(
           message: message,
           attachments: attachments,
