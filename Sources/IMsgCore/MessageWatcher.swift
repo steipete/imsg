@@ -6,13 +6,22 @@ public struct MessageWatcherConfiguration: Sendable, Equatable {
   public var batchLimit: Int
   /// When true, reaction events (tapback add/remove) are included in the stream
   public var includeReactions: Bool
+  /// Delay in milliseconds before re-reading a message row to confirm is_from_me.
+  /// macOS may write is_from_me=0 on INSERT and update it to 1 shortly after.
+  /// Messages where is_from_me is still false after the delay are emitted normally.
+  /// Set to 0 to disable re-confirmation (preserves original behavior).
+  public var reconfirmDelayMs: Int
 
   public init(
-    debounceInterval: TimeInterval = 0.25, batchLimit: Int = 100, includeReactions: Bool = false
+    debounceInterval: TimeInterval = 0.25,
+    batchLimit: Int = 100,
+    includeReactions: Bool = false,
+    reconfirmDelayMs: Int = 400
   ) {
     self.debounceInterval = debounceInterval
     self.batchLimit = batchLimit
     self.includeReactions = includeReactions
+    self.reconfirmDelayMs = reconfirmDelayMs
   }
 }
 
@@ -54,6 +63,8 @@ private final class WatchState: @unchecked Sendable {
   private var cursor: Int64
   private var sources: [DispatchSourceFileSystemObject] = []
   private var pending = false
+  /// RowIDs currently pending re-confirmation (awaiting is_from_me re-read)
+  private var pendingReconfirm: Set<Int64> = []
 
   init(
     store: MessageStore,
@@ -137,13 +148,42 @@ private final class WatchState: @unchecked Sendable {
         includeReactions: configuration.includeReactions
       )
       for message in messages {
-        continuation.yield(message)
         if message.rowID > cursor {
           cursor = message.rowID
+        }
+        // If reconfirmDelayMs > 0 and the message appears outbound (is_from_me=false
+        // with no handle), schedule a re-read: macOS may not have set is_from_me=1 yet.
+        let delayMs = configuration.reconfirmDelayMs
+        if delayMs > 0 && !message.isFromMe && message.handleID == nil {
+          let rowID = message.rowID
+          guard !pendingReconfirm.contains(rowID) else { continue }
+          pendingReconfirm.insert(rowID)
+          let delay = DispatchTimeInterval.milliseconds(delayMs)
+          queue.asyncAfter(deadline: .now() + delay) { [weak self] in
+            self?.reconfirm(rowID: rowID, original: message)
+          }
+        } else {
+          continuation.yield(message)
         }
       }
     } catch {
       continuation.finish(throwing: error)
+    }
+  }
+
+  private func reconfirm(rowID: Int64, original: Message) {
+    pendingReconfirm.remove(rowID)
+    do {
+      if let fresh = try store.message(rowID: rowID) {
+        // Suppress if macOS has now marked this as sent by us
+        if fresh.isFromMe { return }
+        continuation.yield(fresh)
+      } else {
+        // Row gone — suppress
+      }
+    } catch {
+      // On error, fall back to emitting the original
+      continuation.yield(original)
     }
   }
 }

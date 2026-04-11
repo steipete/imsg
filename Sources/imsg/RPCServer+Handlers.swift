@@ -69,12 +69,13 @@ extension RPCServer {
     let endISO = stringParam(params["end"])
     let includeAttachments = boolParam(params["attachments"]) ?? false
     let includeReactions = boolParam(params["include_reactions"]) ?? false
+    let reconfirmDelayMs = intParam(params["reconfirm_delay_ms"]) ?? 400
     let filter = try MessageFilter.fromISO(
       participants: participants,
       startISO: startISO,
       endISO: endISO
     )
-    let config = MessageWatcherConfiguration(includeReactions: includeReactions)
+    let config = MessageWatcherConfiguration(includeReactions: includeReactions, reconfirmDelayMs: reconfirmDelayMs)
     let subID = await subscriptions.allocateID()
     let localStore = store
     let localWatcher = watcher

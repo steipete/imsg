@@ -15,6 +15,9 @@ enum WatchCommand {
             label: "debounce", names: [.long("debounce")],
             help: "debounce interval for filesystem events (e.g. 250ms)"),
           .make(
+            label: "reconfirmDelay", names: [.long("reconfirm-delay")],
+            help: "re-read delay to confirm is_from_me after INSERT (e.g. 400ms, 0 to disable)"),
+          .make(
             label: "sinceRowID", names: [.long("since-rowid")],
             help: "start watching after this rowid"),
           .make(
@@ -62,6 +65,15 @@ enum WatchCommand {
     guard let debounceInterval = DurationParser.parse(debounceString) else {
       throw ParsedValuesError.invalidOption("debounce")
     }
+    let reconfirmDelayString = values.option("reconfirmDelay") ?? "400ms"
+    let reconfirmDelayMs: Int
+    if reconfirmDelayString == "0" || reconfirmDelayString == "0ms" {
+      reconfirmDelayMs = 0
+    } else if let d = DurationParser.parse(reconfirmDelayString) {
+      reconfirmDelayMs = Int(d * 1000)
+    } else {
+      throw ParsedValuesError.invalidOption("reconfirm-delay")
+    }
     let sinceRowID = values.optionInt64("sinceRowID")
     let showAttachments = values.flag("attachments")
     let includeReactions = values.flag("reactions")
@@ -79,7 +91,8 @@ enum WatchCommand {
     let config = MessageWatcherConfiguration(
       debounceInterval: debounceInterval,
       batchLimit: 100,
-      includeReactions: includeReactions
+      includeReactions: includeReactions,
+      reconfirmDelayMs: reconfirmDelayMs
     )
 
     let stream = streamProvider(watcher, chatID, sinceRowID, config)
