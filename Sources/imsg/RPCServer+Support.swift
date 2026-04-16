@@ -95,29 +95,3 @@ actor SubscriptionStore {
     tasks.removeAll()
   }
 }
-
-actor ChatCache {
-  private let store: MessageStore
-  private var infoCache: [Int64: ChatInfo] = [:]
-  private var participantsCache: [Int64: [String]] = [:]
-
-  init(store: MessageStore) {
-    self.store = store
-  }
-
-  func info(chatID: Int64) throws -> ChatInfo? {
-    if let cached = infoCache[chatID] { return cached }
-    if let info = try store.chatInfo(chatID: chatID) {
-      infoCache[chatID] = info
-      return info
-    }
-    return nil
-  }
-
-  func participants(chatID: Int64) throws -> [String] {
-    if let cached = participantsCache[chatID] { return cached }
-    let participants = try store.participants(chatID: chatID)
-    participantsCache[chatID] = participants
-    return participants
-  }
-}

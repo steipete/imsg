@@ -66,10 +66,6 @@ func reactionPayload(_ reaction: Reaction) -> [String: Any] {
   ]
 }
 
-func isGroupHandle(identifier: String, guid: String) -> Bool {
-  return guid.contains(";+;") || identifier.contains(";+;")
-}
-
 func stringParam(_ value: Any?) -> String? {
   if let value = value as? String { return value }
   if let number = value as? NSNumber { return number.stringValue }
