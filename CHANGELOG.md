@@ -1,6 +1,11 @@
 # Changelog
 
 ## Unreleased
+- feat: expose group-chat metadata (`is_group`, `chat_identifier`, `chat_guid`, `chat_name`, `participants`, raw `display_name`, `guid`) in `imsg chats`, `imsg history`, and `imsg watch` JSON output — matching the existing RPC surface. `participants` reports external handles only (the local user is implicit, as in the underlying `chat_handle_join` table).
+- feat: new `imsg group --chat-id <id> [--json]` command prints chat identity and participants for one chat id.
+- feat: `imsg chats` plain text marks groups with a `[<id> group]` tag; `imsg history` prints a group-chat header; `imsg watch` appends ` (group)` to group messages.
+- refactor: move `ChatCache` actor into its own `Sources/imsg/ChatCache.swift`; reuse it in `imsg watch` to memoize per-chat lookups.
+- refactor: move `isGroupHandle(...)` from the CLI target into `IMsgCore` so both CLI JSON and RPC paths share one group-detection source of truth.
 - fix: dedupe URL balloon preview duplicates in watch stream without cross-chat/schema regressions (#64, thanks @lesaai)
 - fix: remove non-functional `typing` command and related RPC methods
 - fix: remove unsupported standalone IMCore typing path and stale error branch

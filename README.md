@@ -24,7 +24,8 @@ make build
 ```
 
 ## Commands
-- `imsg chats [--limit 20] [--json]` — list recent conversations.
+- `imsg chats [--limit 20] [--json]` — list recent conversations (group chats are marked with `[group]` in plain text and carry `is_group`, `guid`, `display_name`, and `participants` in JSON).
+- `imsg group --chat-id <id> [--json]` — show identity and participants for one chat (works for direct chats too).
 - `imsg history --chat-id <id> [--limit 50] [--attachments] [--participants +15551234567,...] [--start 2025-01-01T00:00:00Z] [--end 2025-02-01T00:00:00Z] [--json]`
 - `imsg watch [--chat-id <id>] [--since-rowid <n>] [--debounce 250ms] [--attachments] [--participants …] [--start …] [--end …] [--json]`
 - `imsg send --to <handle> [--text "hi"] [--file /path/img.jpg] [--service imessage|sms|auto] [--region US]`
@@ -34,8 +35,11 @@ make build
 # list 5 chats
 imsg chats --limit 5
 
-# list chats as JSON
+# list chats as JSON (includes is_group, guid, display_name, participants)
 imsg chats --limit 5 --json
+
+# show identity + participants for one chat (works for direct chats too)
+imsg group --chat-id 1 --json
 
 # last 10 messages in chat 1 with attachments
 imsg history --chat-id 1 --limit 10 --attachments
