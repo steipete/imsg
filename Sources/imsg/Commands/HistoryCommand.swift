@@ -46,6 +46,8 @@ enum HistoryCommand {
     )
 
     let store = try MessageStore(path: dbPath)
+    let chatInfo = try store.chatInfo(chatID: chatID)
+    let chatParticipants = try store.participants(chatID: chatID)
     let filtered = try store.messages(chatID: chatID, limit: limit, filter: filter)
 
     if runtime.jsonOutput {
@@ -55,11 +57,20 @@ enum HistoryCommand {
         let payload = MessagePayload(
           message: message,
           attachments: attachments,
-          reactions: reactions
+          reactions: reactions,
+          chatInfo: chatInfo,
+          participants: chatParticipants
         )
         try StdoutWriter.writeJSONLine(payload)
       }
       return
+    }
+
+    if let chatInfo,
+      isGroupHandle(identifier: chatInfo.identifier, guid: chatInfo.guid)
+    {
+      let joined = chatParticipants.joined(separator: ", ")
+      StdoutWriter.writeLine("# group chat: \(chatInfo.name) (participants: \(joined))")
     }
 
     for message in filtered {

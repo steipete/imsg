@@ -81,34 +81,43 @@ enum WatchCommand {
       batchLimit: 100,
       includeReactions: includeReactions
     )
+    let chatCache = ChatCache(store: store)
 
     let stream = streamProvider(watcher, chatID, sinceRowID, config)
     for try await message in stream {
       if !filter.allows(message) {
         continue
       }
+      let chatInfo = try await chatCache.info(chatID: message.chatID)
+      let chatParticipants = try await chatCache.participants(chatID: message.chatID)
+      let isGroup =
+        chatInfo.map { isGroupHandle(identifier: $0.identifier, guid: $0.guid) } ?? false
       if runtime.jsonOutput {
         let attachments = try store.attachments(for: message.rowID)
         let reactions = try store.reactions(for: message.rowID)
         let payload = MessagePayload(
           message: message,
           attachments: attachments,
-          reactions: reactions
+          reactions: reactions,
+          chatInfo: chatInfo,
+          participants: chatParticipants
         )
         try StdoutWriter.writeJSONLine(payload)
         continue
       }
       let direction = message.isFromMe ? "sent" : "recv"
       let timestamp = CLIISO8601.format(message.date)
+      let groupSuffix = isGroup ? " (group)" : ""
       if message.isReaction, let reactionType = message.reactionType {
         let action = (message.isReactionAdd ?? true) ? "added" : "removed"
         let targetGUID = message.reactedToGUID ?? "unknown"
         StdoutWriter.writeLine(
-          "\(timestamp) [\(direction)] \(message.sender) \(action) \(reactionType.emoji) reaction to \(targetGUID)"
+          "\(timestamp) [\(direction)] \(message.sender) \(action) \(reactionType.emoji) reaction to \(targetGUID)\(groupSuffix)"
         )
         continue
       }
-      StdoutWriter.writeLine("\(timestamp) [\(direction)] \(message.sender): \(message.text)")
+      StdoutWriter.writeLine(
+        "\(timestamp) [\(direction)] \(message.sender): \(message.text)\(groupSuffix)")
       if message.attachmentsCount > 0 {
         if showAttachments {
           let metas = try store.attachments(for: message.rowID)

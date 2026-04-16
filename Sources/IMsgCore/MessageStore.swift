@@ -21,6 +21,8 @@ public final class MessageStore: @unchecked Sendable {
   let hasAudioMessageColumn: Bool
   let hasAttachmentUserInfo: Bool
   let hasBalloonBundleIDColumn: Bool
+  let hasChatTable: Bool
+  let hasChatHandleJoinTable: Bool
 
   private struct URLBalloonDedupeEntry: Sendable {
     let rowID: Int64
@@ -54,6 +56,12 @@ public final class MessageStore: @unchecked Sendable {
       self.hasAudioMessageColumn = messageColumns.contains("is_audio_message")
       self.hasAttachmentUserInfo = attachmentColumns.contains("user_info")
       self.hasBalloonBundleIDColumn = messageColumns.contains("balloon_bundle_id")
+      self.hasChatTable = !MessageStore.tableColumns(
+        connection: self.connection, table: "chat"
+      ).isEmpty
+      self.hasChatHandleJoinTable = !MessageStore.tableColumns(
+        connection: self.connection, table: "chat_handle_join"
+      ).isEmpty
     } catch {
       throw MessageStore.enhance(error: error, path: normalized)
     }
@@ -112,12 +120,16 @@ public final class MessageStore: @unchecked Sendable {
     } else {
       self.hasBalloonBundleIDColumn = messageColumns.contains("balloon_bundle_id")
     }
+    self.hasChatTable = !MessageStore.tableColumns(connection: connection, table: "chat").isEmpty
+    self.hasChatHandleJoinTable = !MessageStore.tableColumns(
+      connection: connection, table: "chat_handle_join"
+    ).isEmpty
   }
 
   public func listChats(limit: Int) throws -> [Chat] {
     let sql = """
       SELECT c.ROWID, IFNULL(c.display_name, c.chat_identifier) AS name, c.chat_identifier, c.service_name,
-             MAX(m.date) AS last_date
+             MAX(m.date) AS last_date, c.guid, c.display_name
       FROM chat c
       JOIN chat_message_join cmj ON c.ROWID = cmj.chat_id
       JOIN message m ON m.ROWID = cmj.message_id
@@ -133,15 +145,27 @@ public final class MessageStore: @unchecked Sendable {
         let identifier = stringValue(row[2])
         let service = stringValue(row[3])
         let lastDate = appleDate(from: int64Value(row[4]))
+        let rawGuid = stringValue(row[5])
+        let guid = rawGuid.isEmpty ? nil : rawGuid
+        let rawDisplayName = stringValue(row[6])
+        let displayName = rawDisplayName.isEmpty ? nil : rawDisplayName
         chats.append(
           Chat(
-            id: id, identifier: identifier, name: name, service: service, lastMessageAt: lastDate))
+            id: id,
+            identifier: identifier,
+            name: name,
+            service: service,
+            lastMessageAt: lastDate,
+            guid: guid,
+            displayName: displayName
+          ))
       }
       return chats
     }
   }
 
   public func chatInfo(chatID: Int64) throws -> ChatInfo? {
+    guard hasChatTable else { return nil }
     let sql = """
       SELECT c.ROWID, IFNULL(c.chat_identifier, '') AS identifier, IFNULL(c.guid, '') AS guid,
              IFNULL(c.display_name, c.chat_identifier) AS name, IFNULL(c.service_name, '') AS service
@@ -169,6 +193,7 @@ public final class MessageStore: @unchecked Sendable {
   }
 
   public func participants(chatID: Int64) throws -> [String] {
+    guard hasChatHandleJoinTable else { return [] }
     let sql = """
       SELECT h.id
       FROM chat_handle_join chj

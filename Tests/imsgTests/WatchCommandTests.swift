@@ -176,6 +176,74 @@ func watchCommandFlushesPlainOutput() async throws {
 }
 
 @Test
+func watchCommandEmitsGroupMetadataInJson() async throws {
+  let values = ParsedValues(
+    positional: [],
+    options: ["db": [":memory:"], "debounce": ["1ms"]],
+    flags: ["jsonOutput"]
+  )
+  let runtime = RuntimeOptions(parsedValues: values)
+  let store = try CommandTestDatabase.makeStoreForRPC()
+  let message = Message(
+    rowID: 5,
+    chatID: 1,
+    sender: "+123",
+    text: "hi group",
+    date: Date(),
+    isFromMe: false,
+    service: "iMessage",
+    handleID: nil,
+    attachmentsCount: 0,
+    guid: "watch-group-guid"
+  )
+  let (output, _) = try await StdoutCapture.capture {
+    try await WatchCommand.run(
+      values: values,
+      runtime: runtime,
+      storeFactory: { _ in store },
+      streamProvider: singleMessageStreamProvider(message)
+    )
+  }
+  #expect(output.contains("\"is_group\":true"))
+  #expect(output.contains("\"chat_identifier\":\"iMessage;+;chat123\""))
+  #expect(output.contains("\"chat_name\":\"Group Chat\""))
+  #expect(output.contains("+123"))
+  #expect(output.contains("me@icloud.com"))
+}
+
+@Test
+func watchCommandAppendsGroupSuffixInPlainOutput() async throws {
+  let values = ParsedValues(
+    positional: [],
+    options: ["db": [":memory:"], "debounce": ["1ms"]],
+    flags: []
+  )
+  let runtime = RuntimeOptions(parsedValues: values)
+  let store = try CommandTestDatabase.makeStoreForRPC()
+  let message = Message(
+    rowID: 6,
+    chatID: 1,
+    sender: "+123",
+    text: "hello",
+    date: Date(),
+    isFromMe: false,
+    service: "iMessage",
+    handleID: nil,
+    attachmentsCount: 0,
+    guid: "watch-group-plain-guid"
+  )
+  let (output, _) = try await StdoutCapture.capture {
+    try await WatchCommand.run(
+      values: values,
+      runtime: runtime,
+      storeFactory: { _ in store },
+      streamProvider: singleMessageStreamProvider(message)
+    )
+  }
+  #expect(output.contains("hello (group)"))
+}
+
+@Test
 func watchCommandFlushesJsonOutput() async throws {
   let values = ParsedValues(
     positional: [],

@@ -14,9 +14,28 @@ func chatsCommandRunsWithJsonOutput() async throws {
     flags: ["jsonOutput"]
   )
   let runtime = RuntimeOptions(parsedValues: values)
-  _ = try await StdoutCapture.capture {
+  let (output, _) = try await StdoutCapture.capture {
     try await ChatsCommand.spec.run(values, runtime)
   }
+  #expect(output.contains("\"is_group\":true"))
+  #expect(output.contains("\"guid\":\"iMessage;+;chat123\""))
+  #expect(output.contains("\"display_name\":\"Test Chat\""))
+  #expect(output.contains("\"participants\":[\"+123\",\"+456\"]"))
+}
+
+@Test
+func chatsCommandPlainOutputMarksGroups() async throws {
+  let path = try CommandTestDatabase.makePath()
+  let values = ParsedValues(
+    positional: [],
+    options: ["db": [path], "limit": ["5"]],
+    flags: []
+  )
+  let runtime = RuntimeOptions(parsedValues: values)
+  let (output, _) = try await StdoutCapture.capture {
+    try await ChatsCommand.spec.run(values, runtime)
+  }
+  #expect(output.contains("[1 group]"))
 }
 
 @Test
@@ -28,9 +47,31 @@ func historyCommandRunsWithChatID() async throws {
     flags: ["jsonOutput"]
   )
   let runtime = RuntimeOptions(parsedValues: values)
-  _ = try await StdoutCapture.capture {
+  let (output, _) = try await StdoutCapture.capture {
     try await HistoryCommand.spec.run(values, runtime)
   }
+  #expect(output.contains("\"chat_identifier\":\"+123\""))
+  #expect(output.contains("\"chat_guid\":\"iMessage;+;chat123\""))
+  #expect(output.contains("\"chat_name\":\"Test Chat\""))
+  #expect(output.contains("\"is_group\":true"))
+  #expect(output.contains("\"participants\":[\"+123\",\"+456\"]"))
+}
+
+@Test
+func historyCommandPlainOutputPrintsGroupHeader() async throws {
+  let path = try CommandTestDatabase.makePath()
+  let values = ParsedValues(
+    positional: [],
+    options: ["db": [path], "chatID": ["1"], "limit": ["5"]],
+    flags: []
+  )
+  let runtime = RuntimeOptions(parsedValues: values)
+  let (output, _) = try await StdoutCapture.capture {
+    try await HistoryCommand.spec.run(values, runtime)
+  }
+  #expect(output.contains("# group chat: Test Chat"))
+  #expect(output.contains("+123"))
+  #expect(output.contains("+456"))
 }
 
 @Test

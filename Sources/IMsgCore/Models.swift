@@ -190,13 +190,28 @@ public struct Chat: Sendable, Equatable {
   public let name: String
   public let service: String
   public let lastMessageAt: Date
+  /// Raw `chat.guid` value when available. `nil` when the underlying row had no guid.
+  public let guid: String?
+  /// Raw `chat.display_name` value when available. `nil` when the group/chat has no
+  /// explicit display name (in which case `name` falls back to `identifier`).
+  public let displayName: String?
 
-  public init(id: Int64, identifier: String, name: String, service: String, lastMessageAt: Date) {
+  public init(
+    id: Int64,
+    identifier: String,
+    name: String,
+    service: String,
+    lastMessageAt: Date,
+    guid: String? = nil,
+    displayName: String? = nil
+  ) {
     self.id = id
     self.identifier = identifier
     self.name = name
     self.service = service
     self.lastMessageAt = lastMessageAt
+    self.guid = guid
+    self.displayName = displayName
   }
 }
 

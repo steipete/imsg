@@ -7,13 +7,21 @@ struct ChatPayload: Codable {
   let identifier: String
   let service: String
   let lastMessageAt: String
+  let guid: String?
+  let displayName: String?
+  let isGroup: Bool
+  let participants: [String]?
 
-  init(chat: Chat) {
+  init(chat: Chat, participants: [String]? = nil) {
     self.id = chat.id
     self.name = chat.name
     self.identifier = chat.identifier
     self.service = chat.service
     self.lastMessageAt = CLIISO8601.format(chat.lastMessageAt)
+    self.guid = chat.guid
+    self.displayName = chat.displayName
+    self.isGroup = isGroupHandle(identifier: chat.identifier, guid: chat.guid ?? "")
+    self.participants = participants
   }
 
   enum CodingKeys: String, CodingKey {
@@ -22,6 +30,10 @@ struct ChatPayload: Codable {
     case identifier
     case service
     case lastMessageAt = "last_message_at"
+    case guid
+    case displayName = "display_name"
+    case isGroup = "is_group"
+    case participants
   }
 }
 
@@ -49,7 +61,20 @@ struct MessagePayload: Codable {
   let isReactionAdd: Bool?
   let reactedToGUID: String?
 
-  init(message: Message, attachments: [AttachmentMeta], reactions: [Reaction] = []) {
+  // Chat / group metadata (populated when callers supply chat context)
+  let chatIdentifier: String?
+  let chatGuid: String?
+  let chatName: String?
+  let participants: [String]?
+  let isGroup: Bool?
+
+  init(
+    message: Message,
+    attachments: [AttachmentMeta],
+    reactions: [Reaction] = [],
+    chatInfo: ChatInfo? = nil,
+    participants: [String]? = nil
+  ) {
     self.id = message.rowID
     self.chatID = message.chatID
     self.guid = message.guid
@@ -77,6 +102,21 @@ struct MessagePayload: Codable {
       self.isReactionAdd = nil
       self.reactedToGUID = nil
     }
+
+    // Chat / group metadata. When chatInfo is omitted, all fields stay nil
+    // which preserves the existing JSON shape for callers that don't populate it
+    // (notably the RPC `messagePayload` dictionary builder, which overlays its
+    // own `chat_identifier`, `chat_guid`, `chat_name`, `participants`, `is_group`
+    // keys on top of asDictionary()).
+    self.chatIdentifier = chatInfo?.identifier
+    self.chatGuid = chatInfo?.guid
+    self.chatName = chatInfo?.name
+    self.participants = participants
+    if let chatInfo {
+      self.isGroup = isGroupHandle(identifier: chatInfo.identifier, guid: chatInfo.guid)
+    } else {
+      self.isGroup = nil
+    }
   }
 
   enum CodingKeys: String, CodingKey {
@@ -97,6 +137,11 @@ struct MessagePayload: Codable {
     case reactionEmoji = "reaction_emoji"
     case isReactionAdd = "is_reaction_add"
     case reactedToGUID = "reacted_to_guid"
+    case chatIdentifier = "chat_identifier"
+    case chatGuid = "chat_guid"
+    case chatName = "chat_name"
+    case participants
+    case isGroup = "is_group"
   }
 }
 
@@ -136,6 +181,36 @@ struct ReactionPayload: Codable {
     case sender
     case isFromMe = "is_from_me"
     case createdAt = "created_at"
+  }
+}
+
+struct GroupPayload: Codable {
+  let id: Int64
+  let identifier: String
+  let guid: String
+  let name: String
+  let service: String
+  let isGroup: Bool
+  let participants: [String]
+
+  init(chatInfo: ChatInfo, participants: [String]) {
+    self.id = chatInfo.id
+    self.identifier = chatInfo.identifier
+    self.guid = chatInfo.guid
+    self.name = chatInfo.name
+    self.service = chatInfo.service
+    self.isGroup = isGroupHandle(identifier: chatInfo.identifier, guid: chatInfo.guid)
+    self.participants = participants
+  }
+
+  enum CodingKeys: String, CodingKey {
+    case id
+    case identifier
+    case guid
+    case name
+    case service
+    case isGroup = "is_group"
+    case participants
   }
 }
 

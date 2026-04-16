@@ -26,14 +26,17 @@ enum ChatsCommand {
 
     if runtime.jsonOutput {
       for chat in chats {
-        try StdoutWriter.writeJSONLine(ChatPayload(chat: chat))
+        let participants = try store.participants(chatID: chat.id)
+        try StdoutWriter.writeJSONLine(ChatPayload(chat: chat, participants: participants))
       }
       return
     }
 
     for chat in chats {
       let last = CLIISO8601.format(chat.lastMessageAt)
-      StdoutWriter.writeLine("[\(chat.id)] \(chat.name) (\(chat.identifier)) last=\(last)")
+      let tag = isGroupHandle(identifier: chat.identifier, guid: chat.guid ?? "") ? " group" : ""
+      StdoutWriter.writeLine(
+        "[\(chat.id)\(tag)] \(chat.name) (\(chat.identifier)) last=\(last)")
     }
   }
 }

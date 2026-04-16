@@ -12,7 +12,7 @@ enum CommandTestDatabase {
   static func makePath() throws -> String {
     let path = try makeDatabasePath()
     let db = try Connection(path)
-    try createSchema(db, includeChatHandleJoin: false)
+    try createSchema(db, includeChatHandleJoin: true)
     try seedBasicChat(db)
     return path
   }
@@ -102,7 +102,12 @@ enum CommandTestDatabase {
       VALUES (1, '+123', 'iMessage;+;chat123', 'Test Chat', 'iMessage')
       """
     )
-    try db.run("INSERT INTO handle(ROWID, id) VALUES (1, '+123')")
+    try db.run(
+      "INSERT INTO handle(ROWID, id) VALUES (1, '+123'), (2, '+456')"
+    )
+    try db.run(
+      "INSERT INTO chat_handle_join(chat_id, handle_id) VALUES (1, 1), (1, 2)"
+    )
     try db.run(
       """
       INSERT INTO message(ROWID, handle_id, text, date, is_from_me, service)
