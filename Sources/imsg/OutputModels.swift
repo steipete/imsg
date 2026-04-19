@@ -25,12 +25,48 @@ struct ChatPayload: Codable {
   }
 }
 
+/// Resolved preview of the message a reply is addressed to.
+///
+/// Only populated when the caller passes `--resolve-replies` on `imsg watch`
+/// or `imsg history`. The resolver runs a single `SELECT ... WHERE guid = ?`
+/// against the same read-only chat.db connection, so there is no extra
+/// process overhead; the field is opt-in to preserve the existing JSON shape
+/// for consumers that only rely on `reply_to_guid`.
+struct ReplyToPayload: Codable {
+  let id: Int64
+  let guid: String
+  let sender: String
+  let isFromMe: Bool
+  let text: String
+  let createdAt: String
+
+  init(message: Message) {
+    self.id = message.rowID
+    self.guid = message.guid
+    self.sender = message.sender
+    self.isFromMe = message.isFromMe
+    self.text = message.text
+    self.createdAt = CLIISO8601.format(message.date)
+  }
+
+  enum CodingKeys: String, CodingKey {
+    case id
+    case guid
+    case sender
+    case isFromMe = "is_from_me"
+    case text
+    case createdAt = "created_at"
+  }
+}
+
 struct MessagePayload: Codable {
   let id: Int64
   let chatID: Int64
   let guid: String
   let replyToGUID: String?
+  let replyTo: ReplyToPayload?
   let threadOriginatorGUID: String?
+  let threadOriginator: ReplyToPayload?
   let sender: String
   let isFromMe: Bool
   let text: String
@@ -49,12 +85,20 @@ struct MessagePayload: Codable {
   let isReactionAdd: Bool?
   let reactedToGUID: String?
 
-  init(message: Message, attachments: [AttachmentMeta], reactions: [Reaction] = []) {
+  init(
+    message: Message,
+    attachments: [AttachmentMeta],
+    reactions: [Reaction] = [],
+    replyTo: Message? = nil,
+    threadOriginator: Message? = nil
+  ) {
     self.id = message.rowID
     self.chatID = message.chatID
     self.guid = message.guid
     self.replyToGUID = message.replyToGUID
+    self.replyTo = replyTo.map { ReplyToPayload(message: $0) }
     self.threadOriginatorGUID = message.threadOriginatorGUID
+    self.threadOriginator = threadOriginator.map { ReplyToPayload(message: $0) }
     self.sender = message.sender
     self.isFromMe = message.isFromMe
     self.text = message.text
@@ -84,7 +128,9 @@ struct MessagePayload: Codable {
     case chatID = "chat_id"
     case guid
     case replyToGUID = "reply_to_guid"
+    case replyTo = "reply_to"
     case threadOriginatorGUID = "thread_originator_guid"
+    case threadOriginator = "thread_originator"
     case sender
     case isFromMe = "is_from_me"
     case text

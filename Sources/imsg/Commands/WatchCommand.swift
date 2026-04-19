@@ -31,6 +31,10 @@ enum WatchCommand {
             label: "reactions", names: [.long("reactions")],
             help: "include reaction events (tapback add/remove) in the stream"
           ),
+          .make(
+            label: "resolveReplies", names: [.long("resolve-replies")],
+            help: "resolve reply_to_guid to the referenced message (adds reply_to object in JSON, ↳ prefix line in text output)"
+          ),
         ]
       )
     ),
@@ -65,6 +69,7 @@ enum WatchCommand {
     let sinceRowID = values.optionInt64("sinceRowID")
     let showAttachments = values.flag("attachments")
     let includeReactions = values.flag("reactions")
+    let resolveReplies = values.flag("resolveReplies")
     let participants = values.optionValues("participants")
       .flatMap { $0.split(separator: ",").map { String($0) } }
       .filter { !$0.isEmpty }
@@ -87,13 +92,34 @@ enum WatchCommand {
       if !filter.allows(message) {
         continue
       }
+      let replyToMessage: Message?
+      let threadOriginatorMessage: Message?
+      if resolveReplies {
+        if let guid = message.replyToGUID, !guid.isEmpty {
+          replyToMessage = (try? store.messageByGUID(guid)) ?? nil
+        } else {
+          replyToMessage = nil
+        }
+        if let guid = message.threadOriginatorGUID, !guid.isEmpty,
+          guid != message.replyToGUID
+        {
+          threadOriginatorMessage = (try? store.messageByGUID(guid)) ?? nil
+        } else {
+          threadOriginatorMessage = nil
+        }
+      } else {
+        replyToMessage = nil
+        threadOriginatorMessage = nil
+      }
       if runtime.jsonOutput {
         let attachments = try store.attachments(for: message.rowID)
         let reactions = try store.reactions(for: message.rowID)
         let payload = MessagePayload(
           message: message,
           attachments: attachments,
-          reactions: reactions
+          reactions: reactions,
+          replyTo: replyToMessage,
+          threadOriginator: threadOriginatorMessage
         )
         try StdoutWriter.writeJSONLine(payload)
         continue
@@ -107,6 +133,14 @@ enum WatchCommand {
           "\(timestamp) [\(direction)] \(message.sender) \(action) \(reactionType.emoji) reaction to \(targetGUID)"
         )
         continue
+      }
+      let contextMessage = replyToMessage ?? threadOriginatorMessage
+      if let ctx = contextMessage {
+        let label = (replyToMessage != nil) ? "reply" : "thread"
+        let preview = ctx.text.isEmpty ? "(\(ctx.attachmentsCount > 0 ? "attachment" : "empty"))" : ctx.text
+        StdoutWriter.writeLine(
+          "  \u{21B3} \(label) to \(ctx.sender) #\(ctx.rowID): \(truncate(preview, to: 80))"
+        )
       }
       StdoutWriter.writeLine("\(timestamp) [\(direction)] \(message.sender): \(message.text)")
       if message.attachmentsCount > 0 {

@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- feat: `--resolve-replies` flag on `history` and `watch` resolves `reply_to_guid` and `thread_originator_guid` to the referenced message inline (thanks @lesaai). Adds optional nested `reply_to` / `thread_originator` objects in JSON output and `↳` prefix lines in text output. Opt-in so existing consumers see no schema change.
+- feat: `messageByGUID(_:)` on `MessageStore` for library consumers that need to resolve a GUID to a `Message` without a second process (thanks @lesaai).
 - fix: dedupe URL balloon preview duplicates in watch stream without cross-chat/schema regressions (#64, thanks @lesaai)
 - fix: remove non-functional `typing` command and related RPC methods
 - fix: remove unsupported standalone IMCore typing path and stale error branch

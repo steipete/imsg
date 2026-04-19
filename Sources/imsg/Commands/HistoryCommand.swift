@@ -21,7 +21,11 @@ enum HistoryCommand {
         flags: [
           .make(
             label: "attachments", names: [.long("attachments")], help: "include attachment metadata"
-          )
+          ),
+          .make(
+            label: "resolveReplies", names: [.long("resolve-replies")],
+            help: "resolve reply_to_guid to the referenced message (adds reply_to object in JSON, ↳ prefix line in text output)"
+          ),
         ]
       )
     ),
@@ -36,6 +40,7 @@ enum HistoryCommand {
     let dbPath = values.option("db") ?? MessageStore.defaultPath
     let limit = values.optionInt("limit") ?? 50
     let showAttachments = values.flag("attachments")
+    let resolveReplies = values.flag("resolveReplies")
     let participants = values.optionValues("participants")
       .flatMap { $0.split(separator: ",").map { String($0) } }
       .filter { !$0.isEmpty }
@@ -52,10 +57,24 @@ enum HistoryCommand {
       for message in filtered {
         let attachments = try store.attachments(for: message.rowID)
         let reactions = try store.reactions(for: message.rowID)
+        var replyTo: Message? = nil
+        var threadOriginator: Message? = nil
+        if resolveReplies {
+          if let guid = message.replyToGUID, !guid.isEmpty {
+            replyTo = (try? store.messageByGUID(guid)) ?? nil
+          }
+          if let guid = message.threadOriginatorGUID, !guid.isEmpty,
+            guid != message.replyToGUID
+          {
+            threadOriginator = (try? store.messageByGUID(guid)) ?? nil
+          }
+        }
         let payload = MessagePayload(
           message: message,
           attachments: attachments,
-          reactions: reactions
+          reactions: reactions,
+          replyTo: replyTo,
+          threadOriginator: threadOriginator
         )
         try StdoutWriter.writeJSONLine(payload)
       }
@@ -65,6 +84,28 @@ enum HistoryCommand {
     for message in filtered {
       let direction = message.isFromMe ? "sent" : "recv"
       let timestamp = CLIISO8601.format(message.date)
+      if resolveReplies {
+        var ctx: Message? = nil
+        var label = "reply"
+        if let guid = message.replyToGUID, !guid.isEmpty,
+          let resolved = try? store.messageByGUID(guid)
+        {
+          ctx = resolved
+        } else if let guid = message.threadOriginatorGUID, !guid.isEmpty,
+          let resolved = try? store.messageByGUID(guid)
+        {
+          ctx = resolved
+          label = "thread"
+        }
+        if let ctx = ctx {
+          let preview =
+            ctx.text.isEmpty
+            ? "(\(ctx.attachmentsCount > 0 ? "attachment" : "empty"))" : ctx.text
+          StdoutWriter.writeLine(
+            "  \u{21B3} \(label) to \(ctx.sender) #\(ctx.rowID): \(truncate(preview, to: 80))"
+          )
+        }
+      }
       StdoutWriter.writeLine("\(timestamp) [\(direction)] \(message.sender): \(message.text)")
       if message.attachmentsCount > 0 {
         if showAttachments {
