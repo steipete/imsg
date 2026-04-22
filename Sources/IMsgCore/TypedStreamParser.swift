@@ -3,7 +3,18 @@ import Foundation
 enum TypedStreamParser {
   static func parseAttributedBody(_ data: Data) -> String {
     guard !data.isEmpty else { return "" }
+
+    // Detect UTF-16LE BOM (0xFF 0xFE) — macOS 26.x / SDK 26.x returns UTF-16LE encoding
+    // for message bodies with non-ASCII content via Messages framework CFString/CFAttributedString
     let bytes = [UInt8](data)
+    if bytes.count >= 2, bytes[0] == 0xFF, bytes[1] == 0xFE {
+      // UTF-16LE BOM detected — decode from UTF-16 Little Endian, skipping BOM
+      let utf16Bytes = Data(bytes.dropFirst(2))
+      if let text = String(data: utf16Bytes, encoding: .utf16LittleEndian) {
+        return text.trimmingLeadingControlCharacters()
+      }
+    }
+
     let start = [UInt8(0x01), UInt8(0x2b)]
     let end = [UInt8(0x86), UInt8(0x84)]
     var best = ""
