@@ -82,6 +82,8 @@ struct CommandRouter {
       do {
         try await spec.run(invocation.parsedValues, runtime)
         return 0
+      } catch is BridgeOutput.EmittedError {
+        return 1
       } catch {
         StdoutWriter.writeLine(String(describing: error))
         return 1

@@ -35,7 +35,7 @@ enum SearchCommand {
       "query": q,
       "matchType": values.option("match") ?? "contains",
     ]
-    _ = await BridgeOutput.invokeAndEmit(
+    _ = try await BridgeOutput.invokeAndEmit(
       action: .searchMessages, params: params, runtime: runtime
     ) { data in
       let count = (data["results"] as? [[String: Any]])?.count ?? 0
@@ -61,7 +61,7 @@ enum AccountCommand {
   }
 
   static func run(values: ParsedValues, runtime: RuntimeOptions) async throws {
-    _ = await BridgeOutput.invokeAndEmit(
+    _ = try await BridgeOutput.invokeAndEmit(
       action: .getAccountInfo, params: [:], runtime: runtime
     ) { data in
       let login = (data["login"] as? String) ?? ""
@@ -103,7 +103,7 @@ enum WhoisCommand {
       "address": addr,
       "aliasType": aliasType,
     ]
-    _ = await BridgeOutput.invokeAndEmit(
+    _ = try await BridgeOutput.invokeAndEmit(
       action: .checkImessageAvailability, params: params, runtime: runtime
     ) { data in
       let avail = (data["available"] as? Bool) ?? false
@@ -137,7 +137,7 @@ enum NicknameCommand {
       throw ParsedValuesError.missingOption("address")
     }
     let params: [String: Any] = ["address": addr]
-    _ = await BridgeOutput.invokeAndEmit(
+    _ = try await BridgeOutput.invokeAndEmit(
       action: .getNicknameInfo, params: params, runtime: runtime
     ) { data in
       let has = (data["has_nickname"] as? Bool) ?? false

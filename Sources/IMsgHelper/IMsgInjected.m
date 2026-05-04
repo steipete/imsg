@@ -643,6 +643,62 @@ static NSAttributedString *buildPlainAttributed(NSString *text, NSInteger partIn
     return [[NSAttributedString alloc] initWithString:text attributes:attrs];
 }
 
+/// Apply a JSON-shape array of text-formatting ranges to `text`. Each entry is
+/// `{ "start": int, "length": int, "styles": ["bold"|"italic"|"underline"|"strikethrough", ...] }`.
+/// macOS 15+ only — earlier OSes silently degrade to plain text (the private
+/// IMText* attribute names don't exist before Sequoia). Technique sourced from
+/// BlueBubbles-Server-Helper PR #50 (Nicell).
+static NSMutableAttributedString *buildFormattedAttributed(NSString *text,
+                                                            NSArray *formatting,
+                                                            NSInteger partIndex) {
+    if (![text isKindOfClass:[NSString class]]) text = @"";
+    NSMutableAttributedString *attr = [[NSMutableAttributedString alloc] initWithString:text];
+    NSUInteger len = text.length;
+
+    // Always carry the message-part attribute across the whole string.
+    if (len > 0) {
+        [attr addAttribute:@"__kIMMessagePartAttributeName" value:@(partIndex)
+                     range:NSMakeRange(0, len)];
+    }
+
+    if ([[NSProcessInfo processInfo] operatingSystemVersion].majorVersion < 15) {
+        return attr;  // Pre-Sequoia: no IMText* attributes; ship plain.
+    }
+    if (len == 0 || ![formatting isKindOfClass:[NSArray class]] || formatting.count == 0) {
+        return attr;
+    }
+
+    for (id raw in formatting) {
+        if (![raw isKindOfClass:[NSDictionary class]]) continue;
+        NSDictionary *r = (NSDictionary *)raw;
+        NSNumber *startNum = r[@"start"];
+        NSNumber *lengthNum = r[@"length"];
+        NSArray *styles = r[@"styles"];
+        if (![startNum isKindOfClass:[NSNumber class]]) continue;
+        if (![lengthNum isKindOfClass:[NSNumber class]]) continue;
+        if (![styles isKindOfClass:[NSArray class]]) continue;
+        NSInteger start = startNum.integerValue;
+        NSInteger length = lengthNum.integerValue;
+        if (start < 0 || length <= 0) continue;
+        if ((NSUInteger)(start + length) > len) continue;
+
+        NSRange range = NSMakeRange((NSUInteger)start, (NSUInteger)length);
+        if ([styles containsObject:@"bold"]) {
+            [attr addAttribute:@"__kIMTextBoldAttributeName" value:@1 range:range];
+        }
+        if ([styles containsObject:@"italic"]) {
+            [attr addAttribute:@"__kIMTextItalicAttributeName" value:@1 range:range];
+        }
+        if ([styles containsObject:@"underline"]) {
+            [attr addAttribute:@"__kIMTextUnderlineAttributeName" value:@1 range:range];
+        }
+        if ([styles containsObject:@"strikethrough"]) {
+            [attr addAttribute:@"__kIMTextStrikethroughAttributeName" value:@1 range:range];
+        }
+    }
+    return attr;
+}
+
 #pragma mark - IMMessage Builder
 
 /// Build an IMMessage suitable for `[chat sendMessage:]`. Handles plain text,
@@ -755,11 +811,9 @@ static id buildIMMessage(NSAttributedString *body,
 /// (or with nil if loading times out / no match). Note: the Messages.app
 /// IMChatHistoryController loads asynchronously into chat.chatItems; we issue
 /// the load and then poll for the matching guid.
-static void getMessageItem(IMChat *chat, NSString *messageGuid,
-                           void (^cb)(id messageItem)) {
+static id findMessageItem(IMChat *chat, NSString *messageGuid) {
     if (!chat || !messageGuid.length) {
-        if (cb) cb(nil);
-        return;
+        return nil;
     }
     Class hcClass = NSClassFromString(@"IMChatHistoryController");
     id hc = hcClass ? [hcClass performSelector:@selector(sharedInstance)] : nil;
@@ -779,11 +833,9 @@ static void getMessageItem(IMChat *chat, NSString *messageGuid,
         [inv invoke];
     }
 
-    // Poll chat.chatItems for the guid for up to 2s.
-    __block NSInteger attempts = 0;
-    __block dispatch_block_t blk = nil;
-    blk = ^{
-        attempts++;
+    // Poll chat.chatItems for the guid for up to 2s. Spinning the current
+    // run loop gives IMCore a chance to finish loading requested chat items.
+    for (NSInteger attempts = 0; attempts < 20; attempts++) {
         NSArray *items = nil;
         if ([chat respondsToSelector:@selector(chatItems)]) {
             items = [chat performSelector:@selector(chatItems)];
@@ -800,22 +852,13 @@ static void getMessageItem(IMChat *chat, NSString *messageGuid,
                 guid = [item performSelector:@selector(guid)];
             }
             if ([guid isEqualToString:messageGuid]) {
-                if (cb) cb(item);
-                blk = nil;
-                return;
+                return item;
             }
         }
-        if (attempts < 20) {
-            dispatch_block_t self_blk = blk;
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 100 * NSEC_PER_MSEC),
-                           dispatch_get_main_queue(), self_blk);
-        } else {
-            if (cb) cb(nil);
-            blk = nil;
-        }
-    };
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 50 * NSEC_PER_MSEC),
-                   dispatch_get_main_queue(), blk);
+        [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode
+                                 beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.1]];
+    }
+    return nil;
 }
 
 /// Best-effort messageGuid extractor for transactional sends. Returns the
@@ -907,6 +950,7 @@ static NSDictionary *handleSendMessage(NSInteger requestId, NSDictionary *params
     NSNumber *ddScanNum = params[@"ddScan"];
     BOOL ddScan = [ddScanNum boolValue];
     NSString *attributedBodyB64 = params[@"attributedBody"];
+    NSArray *textFormatting = params[@"textFormatting"];
 
     if (!chatGuid.length) return errorResponse(requestId, @"Missing chatGuid");
     if (!message) message = @"";
@@ -919,7 +963,11 @@ static NSDictionary *handleSendMessage(NSInteger requestId, NSDictionary *params
 
     NSAttributedString *body = attributedBodyFromBase64(attributedBodyB64);
     if (!body) {
-        body = buildPlainAttributed(message, partIndex);
+        if ([textFormatting isKindOfClass:[NSArray class]] && textFormatting.count > 0) {
+            body = buildFormattedAttributed(message, textFormatting, partIndex);
+        } else {
+            body = buildPlainAttributed(message, partIndex);
+        }
     }
     NSAttributedString *subjectAttr = subject.length
         ? buildPlainAttributed(subject, 0)
@@ -1002,7 +1050,13 @@ static NSDictionary *handleSendMultipart(NSInteger requestId, NSDictionary *para
         if (![part isKindOfClass:[NSDictionary class]]) continue;
         NSString *text = part[@"text"];
         if (!text.length) continue;
-        NSAttributedString *seg = buildPlainAttributed(text, partIndex);
+        NSArray *partFormatting = part[@"textFormatting"];
+        NSAttributedString *seg;
+        if ([partFormatting isKindOfClass:[NSArray class]] && partFormatting.count > 0) {
+            seg = buildFormattedAttributed(text, partFormatting, partIndex);
+        } else {
+            seg = buildPlainAttributed(text, partIndex);
+        }
         [body appendAttributedString:seg];
         partIndex++;
     }
@@ -1176,24 +1230,24 @@ static NSDictionary *handleNotifyAnyways(NSInteger requestId, NSDictionary *para
         if (![chat respondsToSelector:sel]) {
             return errorResponse(requestId, @"sendMessageAcknowledgment: not available");
         }
-        getMessageItem(chat, messageGuid, ^(id item) {
-            if (!item) return;
-            @try {
-                NSMethodSignature *sig = [chat methodSignatureForSelector:sel];
-                NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
-                [inv setSelector:sel];
-                [inv setTarget:chat];
-                NSInteger ack = 1000;
-                [inv setArgument:&ack atIndex:2];
-                __unsafe_unretained id ci = item;
-                [inv setArgument:&ci atIndex:3];
-                NSDictionary *empty = @{};
-                [inv setArgument:&empty atIndex:4];
-                __unsafe_unretained NSString *nilGuid = nil;
-                [inv setArgument:&nilGuid atIndex:5];
-                [inv invoke];
-            } @catch (__unused NSException *ex) {}
-        });
+        id item = findMessageItem(chat, messageGuid);
+        if (!item) {
+            return errorResponse(requestId,
+                [NSString stringWithFormat:@"Message not found: %@", messageGuid]);
+        }
+        NSMethodSignature *sig = [chat methodSignatureForSelector:sel];
+        NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
+        [inv setSelector:sel];
+        [inv setTarget:chat];
+        NSInteger ack = 1000;
+        [inv setArgument:&ack atIndex:2];
+        __unsafe_unretained id ci = item;
+        [inv setArgument:&ci atIndex:3];
+        NSDictionary *empty = @{};
+        [inv setArgument:&empty atIndex:4];
+        __unsafe_unretained NSString *nilGuid = nil;
+        [inv setArgument:&nilGuid atIndex:5];
+        [inv invoke];
         return successResponse(requestId, @{
             @"chatGuid": chatGuid, @"messageGuid": messageGuid, @"queued": @YES
         });
@@ -1232,33 +1286,39 @@ static NSDictionary *handleEditMessage(NSInteger requestId, NSDictionary *params
 
     NSAttributedString *newBody = buildPlainAttributed(newText, partIndex);
 
-    getMessageItem(chat, messageGuid, ^(id item) {
-        if (!item) return;
-        @try {
-            NSInteger localPartIndex = partIndex;
-            if (gHasEditMessageItem) {
-                SEL sel = @selector(editMessageItem:atPartIndex:withNewPartText:backwardCompatabilityText:);
-                NSMethodSignature *sig = [chat methodSignatureForSelector:sel];
-                NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
-                [inv setSelector:sel];
-                [inv setTarget:chat];
-                __unsafe_unretained id ci = item;
-                [inv setArgument:&ci atIndex:2];
-                [inv setArgument:&localPartIndex atIndex:3];
-                __unsafe_unretained NSAttributedString *newBodyArg = newBody;
-                [inv setArgument:&newBodyArg atIndex:4];
-                __unsafe_unretained NSString *bcArg = bcText;
-                [inv setArgument:&bcArg atIndex:5];
-                [inv invoke];
-                return;
-            }
+    id item = findMessageItem(chat, messageGuid);
+    if (!item) {
+        return errorResponse(requestId,
+            [NSString stringWithFormat:@"Message not found: %@", messageGuid]);
+    }
+
+    @try {
+        NSInteger localPartIndex = partIndex;
+        if (gHasEditMessageItem) {
+            SEL sel = @selector(editMessageItem:atPartIndex:withNewPartText:backwardCompatabilityText:);
+            NSMethodSignature *sig = [chat methodSignatureForSelector:sel];
+            NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
+            [inv setSelector:sel];
+            [inv setTarget:chat];
+            __unsafe_unretained id ci = item;
+            [inv setArgument:&ci atIndex:2];
+            [inv setArgument:&localPartIndex atIndex:3];
+            __unsafe_unretained NSAttributedString *newBodyArg = newBody;
+            [inv setArgument:&newBodyArg atIndex:4];
+            __unsafe_unretained NSString *bcArg = bcText;
+            [inv setArgument:&bcArg atIndex:5];
+            [inv invoke];
+        } else {
             // macOS 13 path
             SEL sel = @selector(editMessage:atPartIndex:withNewPartText:backwardCompatabilityText:);
             id message = nil;
             if ([item respondsToSelector:@selector(message)]) {
                 message = [item performSelector:@selector(message)];
             }
-            if (!message) return;
+            if (!message) {
+                return errorResponse(requestId,
+                    [NSString stringWithFormat:@"Message object not found: %@", messageGuid]);
+            }
             NSMethodSignature *sig = [chat methodSignatureForSelector:sel];
             NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
             [inv setSelector:sel];
@@ -1271,8 +1331,10 @@ static NSDictionary *handleEditMessage(NSInteger requestId, NSDictionary *params
             __unsafe_unretained NSString *bcArg = bcText;
             [inv setArgument:&bcArg atIndex:5];
             [inv invoke];
-        } @catch (__unused NSException *ex) {}
-    });
+        }
+    } @catch (NSException *ex) {
+        return errorResponse(requestId, ex.reason ?: @"edit-message failed");
+    }
 
     return successResponse(requestId, @{
         @"chatGuid": chatGuid,
@@ -1300,50 +1362,58 @@ static NSDictionary *handleUnsendMessage(NSInteger requestId, NSDictionary *para
         return errorResponse(requestId, @"retractMessagePart: not available on this macOS");
     }
 
-    getMessageItem(chat, messageGuid, ^(id messageItem) {
-        if (!messageItem) return;
-        @try {
-            id newChatItems = nil;
-            SEL ncSel = @selector(_newChatItems);
-            if ([messageItem respondsToSelector:ncSel]) {
-                // Route through objc_msgSend to avoid ARC's "performSelector
-                // names a selector which retains the object" warning on the
-                // underscore-prefixed selector.
-                newChatItems = ((id (*)(id, SEL))objc_msgSend)(messageItem, ncSel);
-            }
-            id target = nil;
-            if ([newChatItems isKindOfClass:[NSArray class]]) {
-                NSArray *arr = newChatItems;
-                if (arr.count == 0) target = messageItem;
-                else if (arr.count == 1) target = arr.firstObject;
-                else {
-                    for (id sub in arr) {
-                        // Aggregate attachment unwrap
-                        if ([sub respondsToSelector:@selector(aggregateAttachmentParts)]) {
-                            NSArray *agg = [sub performSelector:@selector(aggregateAttachmentParts)];
-                            for (id p in agg) {
-                                if ([p respondsToSelector:@selector(index)]
-                                    && [(IMMessagePartChatItem *)p index] == partIndex) {
-                                    target = p; break;
-                                }
+    id messageItem = findMessageItem(chat, messageGuid);
+    if (!messageItem) {
+        return errorResponse(requestId,
+            [NSString stringWithFormat:@"Message not found: %@", messageGuid]);
+    }
+
+    @try {
+        id newChatItems = nil;
+        SEL ncSel = @selector(_newChatItems);
+        if ([messageItem respondsToSelector:ncSel]) {
+            // Route through objc_msgSend to avoid ARC's "performSelector
+            // names a selector which retains the object" warning on the
+            // underscore-prefixed selector.
+            newChatItems = ((id (*)(id, SEL))objc_msgSend)(messageItem, ncSel);
+        }
+        id target = nil;
+        if ([newChatItems isKindOfClass:[NSArray class]]) {
+            NSArray *arr = newChatItems;
+            if (arr.count == 0) target = messageItem;
+            else if (arr.count == 1) target = arr.firstObject;
+            else {
+                for (id sub in arr) {
+                    // Aggregate attachment unwrap
+                    if ([sub respondsToSelector:@selector(aggregateAttachmentParts)]) {
+                        NSArray *agg = [sub performSelector:@selector(aggregateAttachmentParts)];
+                        for (id p in agg) {
+                            if ([p respondsToSelector:@selector(index)]
+                                && [(IMMessagePartChatItem *)p index] == partIndex) {
+                                target = p; break;
                             }
-                            if (target) break;
                         }
-                        if ([sub respondsToSelector:@selector(index)]
-                            && [(IMMessagePartChatItem *)sub index] == partIndex) {
-                            target = sub; break;
-                        }
+                        if (target) break;
+                    }
+                    if ([sub respondsToSelector:@selector(index)]
+                        && [(IMMessagePartChatItem *)sub index] == partIndex) {
+                        target = sub; break;
                     }
                 }
-            } else if (newChatItems != nil) {
-                target = newChatItems;
-            } else {
-                target = messageItem;
             }
-            if (!target) return;
-            [chat performSelector:@selector(retractMessagePart:) withObject:target];
-        } @catch (__unused NSException *ex) {}
-    });
+        } else if (newChatItems != nil) {
+            target = newChatItems;
+        } else {
+            target = messageItem;
+        }
+        if (!target) {
+            return errorResponse(requestId,
+                [NSString stringWithFormat:@"Message part not found: %ld", (long)partIndex]);
+        }
+        [chat performSelector:@selector(retractMessagePart:) withObject:target];
+    } @catch (NSException *ex) {
+        return errorResponse(requestId, ex.reason ?: @"unsend-message failed");
+    }
 
     return successResponse(requestId, @{
         @"chatGuid": chatGuid,
@@ -1371,12 +1441,16 @@ static NSDictionary *handleDeleteMessage(NSInteger requestId, NSDictionary *para
         return errorResponse(requestId, @"deleteChatItems: not available");
     }
 
-    getMessageItem(chat, messageGuid, ^(id item) {
-        if (!item) return;
-        @try {
-            [chat performSelector:sel withObject:@[item]];
-        } @catch (__unused NSException *ex) {}
-    });
+    id item = findMessageItem(chat, messageGuid);
+    if (!item) {
+        return errorResponse(requestId,
+            [NSString stringWithFormat:@"Message not found: %@", messageGuid]);
+    }
+    @try {
+        [chat performSelector:sel withObject:@[item]];
+    } @catch (NSException *ex) {
+        return errorResponse(requestId, ex.reason ?: @"delete-message failed");
+    }
 
     return successResponse(requestId, @{
         @"chatGuid": chatGuid, @"messageGuid": messageGuid, @"queued": @YES
@@ -1436,7 +1510,14 @@ static NSDictionary *handleMarkChatUnread(NSInteger requestId, NSDictionary *par
     if (!chat) return errorResponse(requestId, @"Chat not found");
     @try {
         if ([chat respondsToSelector:@selector(setUnreadCount:)]) {
-            [chat performSelector:@selector(setUnreadCount:) withObject:@(1)];
+            SEL sel = @selector(setUnreadCount:);
+            NSMethodSignature *sig = [chat methodSignatureForSelector:sel];
+            NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
+            [inv setSelector:sel];
+            [inv setTarget:chat];
+            NSInteger unreadCount = 1;
+            [inv setArgument:&unreadCount atIndex:2];
+            [inv invoke];
         } else {
             return errorResponse(requestId, @"setUnreadCount: not available");
         }

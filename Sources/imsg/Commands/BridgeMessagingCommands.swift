@@ -4,6 +4,8 @@ import IMsgCore
 
 /// Helpers shared by all bridge-backed commands.
 enum BridgeOutput {
+  struct EmittedError: Error {}
+
   static func emit(_ data: [String: Any], runtime: RuntimeOptions, summary: String) {
     if runtime.jsonOutput {
       try? JSONLines.printObject(data)
@@ -27,14 +29,14 @@ enum BridgeOutput {
     params: [String: Any],
     runtime: RuntimeOptions,
     summary: (([String: Any]) -> String)
-  ) async -> [String: Any]? {
+  ) async throws -> [String: Any] {
     do {
       let data = try await IMsgBridgeClient.shared.invoke(action: action, params: params)
       emit(data, runtime: runtime, summary: summary(data))
       return data
     } catch {
       emitError(String(describing: error), runtime: runtime)
-      return nil
+      throw EmittedError()
     }
   }
 }
@@ -59,6 +61,8 @@ enum SendRichCommand {
           .make(label: "subject", names: [.long("subject")], help: "subject line"),
           .make(label: "replyTo", names: [.long("reply-to")], help: "guid of message to reply to"),
           .make(label: "part", names: [.long("part")], help: "part index (default 0)"),
+          .make(label: "format", names: [.long("format")], help: "JSON array of {start,length,styles:[bold|italic|underline|strikethrough]} ranges (macOS 15+)"),
+          .make(label: "formatFile", names: [.long("format-file")], help: "path to JSON file containing the format ranges array"),
         ],
         flags: [
           .make(label: "noDDScan", names: [.long("no-dd-scan")], help: "disable data-detector scan deferral"),
@@ -68,6 +72,7 @@ enum SendRichCommand {
     usageExamples: [
       "imsg send-rich --chat 'iMessage;-;+15551234567' --text 'hi'",
       "imsg send-rich --chat 'iMessage;-;+15551234567' --text 'BOOM' --effect com.apple.MobileSMS.expressivesend.impact",
+      "imsg send-rich --chat ... --text 'hello world' --format '[{\"start\":0,\"length\":5,\"styles\":[\"bold\"]}]'",
     ]
   ) { values, runtime in
     try await run(values: values, runtime: runtime)
@@ -90,7 +95,28 @@ enum SendRichCommand {
       params["selectedMessageGuid"] = reply
     }
 
-    _ = await BridgeOutput.invokeAndEmit(
+    // Optional text formatting (macOS 15+ — Sequoia and later). Pass either
+    // inline JSON via --format or a file path via --format-file. Format:
+    //   [{"start":0,"length":5,"styles":["bold","italic"]}, ...]
+    let formatRaw: String?
+    if let inline = values.option("format"), !inline.isEmpty {
+      formatRaw = inline
+    } else if let path = values.option("formatFile"), !path.isEmpty {
+      formatRaw = try String(contentsOfFile: path, encoding: .utf8)
+    } else {
+      formatRaw = nil
+    }
+    if let raw = formatRaw {
+      guard
+        let bytes = raw.data(using: .utf8),
+        let ranges = try JSONSerialization.jsonObject(with: bytes) as? [[String: Any]]
+      else {
+        throw ParsedValuesError.invalidOption("format")
+      }
+      params["textFormatting"] = ranges
+    }
+
+    _ = try await BridgeOutput.invokeAndEmit(
       action: .sendMessage, params: params, runtime: runtime
     ) { data in
       let guid = (data["messageGuid"] as? String) ?? ""
@@ -150,7 +176,7 @@ enum SendMultipartCommand {
     if let effect = values.option("effect"), !effect.isEmpty { params["effectId"] = effect }
     if let subject = values.option("subject"), !subject.isEmpty { params["subject"] = subject }
 
-    _ = await BridgeOutput.invokeAndEmit(
+    _ = try await BridgeOutput.invokeAndEmit(
       action: .sendMultipart, params: params, runtime: runtime
     ) { data in
       let guid = (data["messageGuid"] as? String) ?? ""
@@ -198,7 +224,7 @@ enum SendAttachmentCommand {
       "filePath": expanded,
       "isAudioMessage": values.flag("audio"),
     ]
-    _ = await BridgeOutput.invokeAndEmit(
+    _ = try await BridgeOutput.invokeAndEmit(
       action: .sendAttachment, params: params, runtime: runtime
     ) { data in
       let guid = (data["messageGuid"] as? String) ?? ""
@@ -255,7 +281,7 @@ enum BridgeReactCommand {
       "reactionType": prefixed,
       "partIndex": Int(values.option("part") ?? "0") ?? 0,
     ]
-    _ = await BridgeOutput.invokeAndEmit(
+    _ = try await BridgeOutput.invokeAndEmit(
       action: .sendReaction, params: params, runtime: runtime
     ) { _ in "tapback: \(prefixed) sent" }
   }
@@ -274,7 +300,10 @@ enum EditCommand {
           .make(label: "chat", names: [.long("chat")], help: "chat guid"),
           .make(label: "message", names: [.long("message")], help: "target message guid"),
           .make(label: "newText", names: [.long("new-text")], help: "replacement text"),
-          .make(label: "bcText", names: [.long("bc-text")], help: "backwards-compat text shown to older clients (default: same as new-text)"),
+          .make(
+            label: "bcText",
+            names: [.long("bc-text")],
+            help: "backwards-compat text shown to older clients (default: same as new-text)"),
           .make(label: "part", names: [.long("part")], help: "part index"),
         ]
       )
@@ -301,7 +330,7 @@ enum EditCommand {
       "backwardsCompatibilityMessage": values.option("bcText") ?? newText,
       "partIndex": Int(values.option("part") ?? "0") ?? 0,
     ]
-    _ = await BridgeOutput.invokeAndEmit(
+    _ = try await BridgeOutput.invokeAndEmit(
       action: .editMessage, params: params, runtime: runtime
     ) { _ in "edit: queued" }
   }
@@ -340,7 +369,7 @@ enum UnsendCommand {
       "messageGuid": message,
       "partIndex": Int(values.option("part") ?? "0") ?? 0,
     ]
-    _ = await BridgeOutput.invokeAndEmit(
+    _ = try await BridgeOutput.invokeAndEmit(
       action: .unsendMessage, params: params, runtime: runtime
     ) { _ in "unsend: queued" }
   }
@@ -377,7 +406,7 @@ enum DeleteMessageCommand {
       "chatGuid": chat,
       "messageGuid": message,
     ]
-    _ = await BridgeOutput.invokeAndEmit(
+    _ = try await BridgeOutput.invokeAndEmit(
       action: .deleteMessage, params: params, runtime: runtime
     ) { _ in "delete-message: queued" }
   }
@@ -411,7 +440,7 @@ enum NotifyAnywaysCommand {
       throw ParsedValuesError.missingOption("message")
     }
     let params: [String: Any] = ["chatGuid": chat, "messageGuid": message]
-    _ = await BridgeOutput.invokeAndEmit(
+    _ = try await BridgeOutput.invokeAndEmit(
       action: .notifyAnyways, params: params, runtime: runtime
     ) { _ in "notify-anyways: queued" }
   }

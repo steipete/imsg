@@ -44,7 +44,7 @@ enum ChatCreateCommand {
     if let text = values.option("text"), !text.isEmpty { params["message"] = text }
     if let name = values.option("name"), !name.isEmpty { params["displayName"] = name }
 
-    _ = await BridgeOutput.invokeAndEmit(
+    _ = try await BridgeOutput.invokeAndEmit(
       action: .createChat, params: params, runtime: runtime
     ) { data in
       let guid = (data["chatGuid"] as? String) ?? ""
@@ -81,7 +81,7 @@ enum ChatNameCommand {
       throw ParsedValuesError.missingOption("name")
     }
     let params: [String: Any] = ["chatGuid": chat, "newName": name]
-    _ = await BridgeOutput.invokeAndEmit(
+    _ = try await BridgeOutput.invokeAndEmit(
       action: .setDisplayName, params: params, runtime: runtime
     ) { _ in "chat-name: set" }
   }
@@ -115,7 +115,7 @@ enum ChatPhotoCommand {
     if let file = values.option("file"), !file.isEmpty {
       params["filePath"] = (file as NSString).expandingTildeInPath
     }
-    _ = await BridgeOutput.invokeAndEmit(
+    _ = try await BridgeOutput.invokeAndEmit(
       action: .updateGroupPhoto, params: params, runtime: runtime
     ) { _ in "chat-photo: updated" }
   }
@@ -149,7 +149,7 @@ enum ChatAddMemberCommand {
       throw ParsedValuesError.missingOption("address")
     }
     let params: [String: Any] = ["chatGuid": chat, "address": addr]
-    _ = await BridgeOutput.invokeAndEmit(
+    _ = try await BridgeOutput.invokeAndEmit(
       action: .addParticipant, params: params, runtime: runtime
     ) { _ in "chat-add-member: added" }
   }
@@ -181,7 +181,7 @@ enum ChatRemoveMemberCommand {
       throw ParsedValuesError.missingOption("address")
     }
     let params: [String: Any] = ["chatGuid": chat, "address": addr]
-    _ = await BridgeOutput.invokeAndEmit(
+    _ = try await BridgeOutput.invokeAndEmit(
       action: .removeParticipant, params: params, runtime: runtime
     ) { _ in "chat-remove-member: removed" }
   }
@@ -211,7 +211,7 @@ enum ChatLeaveCommand {
       throw ParsedValuesError.missingOption("chat")
     }
     let params: [String: Any] = ["chatGuid": chat]
-    _ = await BridgeOutput.invokeAndEmit(
+    _ = try await BridgeOutput.invokeAndEmit(
       action: .leaveChat, params: params, runtime: runtime
     ) { _ in "chat-leave: left" }
   }
@@ -239,7 +239,7 @@ enum ChatDeleteCommand {
       throw ParsedValuesError.missingOption("chat")
     }
     let params: [String: Any] = ["chatGuid": chat]
-    _ = await BridgeOutput.invokeAndEmit(
+    _ = try await BridgeOutput.invokeAndEmit(
       action: .deleteChat, params: params, runtime: runtime
     ) { _ in "chat-delete: deleted" }
   }
@@ -282,7 +282,7 @@ enum ChatMarkCommand {
     }
     let action: BridgeAction = unread ? .markChatUnread : .markChatRead
     let params: [String: Any] = ["chatGuid": chat]
-    _ = await BridgeOutput.invokeAndEmit(
+    _ = try await BridgeOutput.invokeAndEmit(
       action: action, params: params, runtime: runtime
     ) { _ in "chat-mark: \(unread ? "unread" : "read")" }
   }

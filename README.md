@@ -265,9 +265,19 @@ imsg send-rich --chat 'iMessage;-;+15551234567' --text "boom" \
   --effect com.apple.MobileSMS.expressivesend.impact \
   --reply-to <messageGuid>
 
-# Multipart send (text-only in v1; mention/file parts coming later)
+# Text formatting (macOS 15+ Sequoia only): bold/italic/underline/strikethrough
+# applied to specific ranges of the message body.
+imsg send-rich --chat ... --text 'hello world' \
+  --format '[{"start":0,"length":5,"styles":["bold"]},
+             {"start":6,"length":5,"styles":["italic","underline"]}]'
+
+# Or load the ranges from a file
+imsg send-rich --chat ... --text "$(cat msg.txt)" --format-file ranges.json
+
+# Multipart send (text-only in v1; per-part textFormatting also supported)
 imsg send-multipart --chat 'iMessage;+;chat0000' \
-  --parts '[{"text":"hi"},{"text":"there"}]'
+  --parts '[{"text":"hi"},
+            {"text":"there","textFormatting":[{"start":0,"length":5,"styles":["bold"]}]}]'
 
 # Attachment (file or audio)
 imsg send-attachment --chat ... --file ~/Pictures/img.jpg
