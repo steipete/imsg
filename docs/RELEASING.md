@@ -27,6 +27,9 @@
    - `git push origin vX.Y.Z`
    - `gh release create vX.Y.Z /tmp/imsg-macos.zip -t "vX.Y.Z" -F /tmp/release-notes.txt`
    - `gh release edit vX.Y.Z --notes-file /tmp/release-notes.txt` (if needed)
+5. Update Homebrew tap
+   - Run `scripts/update-homebrew.sh vX.Y.Z` to trigger the centralized formula updater.
+   - Requires a GitHub token with workflow dispatch access to `steipete/homebrew-tap`.
 
 ## What happens in CI
 - Release signing + notarization are done locally via `scripts/sign-and-notarize.sh`.
