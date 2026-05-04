@@ -35,6 +35,10 @@ enum WatchCommand {
             label: "reactions", names: [.long("reactions")],
             help: "include reaction events (tapback add/remove) in the stream"
           ),
+          .make(
+            label: "bbEvents", names: [.long("bb-events")],
+            help: "include dylib-pushed events (typing, alias-removed) when injection is active"
+          ),
         ]
       )
     ),
@@ -92,6 +96,28 @@ enum WatchCommand {
       batchLimit: 100,
       includeReactions: includeReactions
     )
+
+    let bbEvents = values.flag("bbEvents")
+    if bbEvents {
+      let path = MessagesLauncher.shared.bridgeEventsFile
+      let tailer = IMsgEventTailer(path: path)
+      Task {
+        for await event in tailer.events() {
+          if runtime.jsonOutput {
+            var obj: [String: Any] = [
+              "kind": "bridge-event",
+              "event": event.name,
+            ]
+            if let ts = event.timestamp { obj["ts"] = ts }
+            obj["data"] = event.decodedPayload()
+            try? JSONLines.printObject(obj)
+          } else {
+            let stamp = event.timestamp ?? CLIISO8601.format(Date())
+            StdoutWriter.writeLine("\(stamp) [bridge] \(event.name)")
+          }
+        }
+      }
+    }
 
     let stream = streamProvider(watcher, chatID, sinceRowID, config)
     for try await message in stream {

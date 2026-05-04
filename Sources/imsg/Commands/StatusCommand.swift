@@ -34,6 +34,22 @@ enum StatusCommand {
       }
     }()
 
+    // Probe the bridge for v2 readiness + selector availability.
+    var bridgeVersion: Int = 0
+    var v2Ready: Bool = false
+    var selectors: [String: Bool] = [:]
+    if availability.available {
+      do {
+        let data = try await IMsgBridgeClient.shared.invoke(
+          action: .status, params: [:], timeout: 3.0)
+        bridgeVersion = (data["bridge_version"] as? Int) ?? 0
+        v2Ready = (data["v2_ready"] as? Bool) ?? false
+        if let raw = data["selectors"] as? [String: Bool] { selectors = raw }
+      } catch {
+        // Bridge probe failure is non-fatal.
+      }
+    }
+
     if runtime.jsonOutput {
       let payload = StatusPayload(
         basicFeatures: true,
@@ -41,7 +57,10 @@ enum StatusCommand {
         typingIndicators: availability.available,
         readReceipts: availability.available,
         sip: sipStatus,
-        message: availability.message
+        message: availability.message,
+        bridgeVersion: bridgeVersion,
+        v2Ready: v2Ready,
+        selectors: selectors
       )
       try JSONLines.print(payload)
     } else {
@@ -57,12 +76,21 @@ enum StatusCommand {
       StdoutWriter.writeLine("Advanced features (typing, read receipts):")
       if availability.available {
         StdoutWriter.writeLine("  Available - IMCore bridge connected")
+        StdoutWriter.writeLine("  bridge version: v\(bridgeVersion)\(v2Ready ? " (v2 inbox active)" : "")")
+        if !selectors.isEmpty {
+          StdoutWriter.writeLine("  selectors:")
+          for key in selectors.keys.sorted() {
+            let ok = selectors[key] ?? false
+            StdoutWriter.writeLine("    \(key): \(ok ? "✓" : "✗")")
+          }
+        }
         StdoutWriter.writeLine("")
-        StdoutWriter.writeLine("Available commands:")
-        StdoutWriter.writeLine("  imsg read --to <handle>")
-        StdoutWriter.writeLine("  imsg typing --to <handle>")
-        StdoutWriter.writeLine("  imsg launch")
-        StdoutWriter.writeLine("  imsg status")
+        StdoutWriter.writeLine("Available bridge commands:")
+        StdoutWriter.writeLine("  Send: imsg send-rich, send-multipart, send-attachment, tapback")
+        StdoutWriter.writeLine("  Mutate: imsg edit, unsend, delete-message, notify-anyways")
+        StdoutWriter.writeLine("  Chat: imsg chat-create, chat-name, chat-photo, chat-add/remove-member, chat-leave/delete, chat-mark")
+        StdoutWriter.writeLine("  Introspect: imsg account, whois, nickname, search")
+        StdoutWriter.writeLine("  Watch with events: imsg watch --bb-events")
       } else {
         StdoutWriter.writeLine("  Not available")
         StdoutWriter.writeLine("")
@@ -102,6 +130,9 @@ private struct StatusPayload: Encodable {
   let readReceipts: Bool
   let sip: String
   let message: String
+  let bridgeVersion: Int
+  let v2Ready: Bool
+  let selectors: [String: Bool]
 
   enum CodingKeys: String, CodingKey {
     case basicFeatures = "basic_features"
@@ -110,5 +141,8 @@ private struct StatusPayload: Encodable {
     case readReceipts = "read_receipts"
     case sip
     case message
+    case bridgeVersion = "bridge_version"
+    case v2Ready = "v2_ready"
+    case selectors
   }
 }

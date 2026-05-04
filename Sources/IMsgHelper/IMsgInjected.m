@@ -12,15 +12,32 @@
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
 #import <objc/message.h>
+#import <os/lock.h>
 #import <unistd.h>
+#import <stdio.h>
+#import <sys/stat.h>
 
 #pragma mark - Constants
 
+// v1 (legacy) single-file IPC paths.
 static NSString *kCommandFile = nil;
 static NSString *kResponseFile = nil;
 static NSString *kLockFile = nil;
+
+// v2 queue-directory IPC paths.
+static NSString *kRpcDir = nil;       // .imsg-rpc/
+static NSString *kRpcInDir = nil;     // .imsg-rpc/in/
+static NSString *kRpcOutDir = nil;    // .imsg-rpc/out/
+static NSString *kEventsFile = nil;   // .imsg-events.jsonl
+static NSString *kEventsRotated = nil;// .imsg-events.jsonl.1
+
 static NSTimer *fileWatchTimer = nil;
+static NSTimer *rpcInboxTimer = nil;
+static NSMutableSet *processedRpcIds = nil;
+static os_unfair_lock eventsLock = OS_UNFAIR_LOCK_INIT;
 static int lockFd = -1;
+
+static const NSUInteger kEventsRotateBytes = 1 * 1024 * 1024;
 
 static void initFilePaths(void) {
     if (kCommandFile == nil) {
@@ -30,16 +47,74 @@ static void initFilePaths(void) {
         kCommandFile = [containerPath stringByAppendingPathComponent:@".imsg-command.json"];
         kResponseFile = [containerPath stringByAppendingPathComponent:@".imsg-response.json"];
         kLockFile = [containerPath stringByAppendingPathComponent:@".imsg-bridge-ready"];
+        kRpcDir = [containerPath stringByAppendingPathComponent:@".imsg-rpc"];
+        kRpcInDir = [kRpcDir stringByAppendingPathComponent:@"in"];
+        kRpcOutDir = [kRpcDir stringByAppendingPathComponent:@"out"];
+        kEventsFile = [containerPath stringByAppendingPathComponent:@".imsg-events.jsonl"];
+        kEventsRotated = [containerPath stringByAppendingPathComponent:@".imsg-events.jsonl.1"];
+    }
+    if (processedRpcIds == nil) {
+        processedRpcIds = [NSMutableSet set];
     }
 }
 
+#pragma mark - Selector Probes
+
+// Populated at startup by probeSelectors(). Surfaced via the `status` action so
+// the CLI can report which IMCore selectors are present on the running macOS
+// (edit/unsend names changed across 13/14/15).
+static BOOL gHasEditMessageItem = NO;        // editMessageItem:atPartIndex:withNewPartText:backwardCompatabilityText:
+static BOOL gHasEditMessage = NO;            // editMessage:atPartIndex:withNewPartText:backwardCompatabilityText:
+static BOOL gHasRetractMessagePart = NO;     // retractMessagePart:
+static BOOL gHasSendMessageReason = NO;      // sendMessage:reason:
+
+static void probeSelectors(void) {
+    Class chatClass = NSClassFromString(@"IMChat");
+    if (!chatClass) return;
+    gHasEditMessageItem = [chatClass instancesRespondToSelector:
+        @selector(editMessageItem:atPartIndex:withNewPartText:backwardCompatabilityText:)];
+    gHasEditMessage = [chatClass instancesRespondToSelector:
+        @selector(editMessage:atPartIndex:withNewPartText:backwardCompatabilityText:)];
+    gHasRetractMessagePart = [chatClass instancesRespondToSelector:
+        @selector(retractMessagePart:)];
+    gHasSendMessageReason = [chatClass instancesRespondToSelector:
+        @selector(sendMessage:reason:)];
+    NSLog(@"[imsg-bridge] Selector probes: editItem=%d editLegacy=%d retract=%d sendReason=%d",
+          gHasEditMessageItem, gHasEditMessage, gHasRetractMessagePart, gHasSendMessageReason);
+}
+
 #pragma mark - Forward Declarations for IMCore Classes
+
+@interface IMHandle : NSObject
+- (NSString *)ID;
+- (NSString *)serviceName;
+@end
+
+@interface IMAccount : NSObject
+- (NSArray *)vettedAliases;
+- (id)loginIMHandle;
+- (NSString *)serviceName;
+- (BOOL)isActive;
+@end
+
+@interface IMAccountController : NSObject
++ (instancetype)sharedInstance;
+- (IMAccount *)activeIMessageAccount;
+- (NSArray *)activeAccounts;
+@end
+
+@interface IMHandleRegistrar : NSObject
++ (instancetype)sharedInstance;
+- (id)IMHandleWithID:(NSString *)handleID;
+@end
 
 @interface IMChatRegistry : NSObject
 + (instancetype)sharedInstance;
 - (id)existingChatWithGUID:(NSString *)guid;
 - (id)existingChatWithChatIdentifier:(NSString *)identifier;
 - (NSArray *)allExistingChats;
+- (id)chatForIMHandle:(id)handle;
+- (id)chatForIMHandles:(NSArray *)handles;
 @end
 
 @interface IMChat : NSObject
@@ -48,10 +123,72 @@ static void initFilePaths(void) {
 - (NSArray *)participants;
 - (NSString *)guid;
 - (NSString *)chatIdentifier;
+- (NSString *)displayName;
+- (id)lastMessage;
+- (id)lastSentMessage;
+- (id)account;
+- (NSString *)displayNameForChat;
+- (void)sendMessage:(id)message;
+- (void)leaveChat;
+- (void)setDisplayName:(NSString *)name;
+- (void)setUnreadCount:(NSInteger)count;
+- (BOOL)hasUnreadMessages;
+- (NSArray *)chatItems;
 @end
 
-@interface IMHandle : NSObject
-- (NSString *)ID;
+@interface IMMessage : NSObject
+- (NSString *)guid;
+- (id)sender;
+- (NSDate *)time;
+- (NSAttributedString *)text;
+- (NSAttributedString *)subject;
+- (NSArray *)fileTransferGUIDs;
+@end
+
+@interface IMMessageItem : NSObject
+- (NSString *)guid;
+- (NSArray *)_newChatItems;
+- (id)message;
+@end
+
+@interface IMMessagePartChatItem : NSObject
+- (NSInteger)index;
+- (NSAttributedString *)text;
+- (NSRange)messagePartRange;
+@end
+
+@interface IMAggregateAttachmentMessagePartChatItem : NSObject
+- (NSArray *)aggregateAttachmentParts;
+@end
+
+@interface IMFileTransfer : NSObject
+- (NSString *)guid;
+- (NSString *)localPath;
+- (NSString *)transferState;
+@end
+
+@interface IMFileTransferCenter : NSObject
++ (instancetype)sharedInstance;
+- (IMFileTransfer *)guidForNewOutgoingTransferWithLocalURL:(NSURL *)url;
+- (IMFileTransfer *)transferForGUID:(NSString *)guid;
+@end
+
+@interface IMChatHistoryController : NSObject
++ (instancetype)sharedInstance;
+- (void)loadedChatItemsForChat:(IMChat *)chat
+                    beforeDate:(NSDate *)date
+                         limit:(NSUInteger)limit
+                  loadIfNeeded:(BOOL)load;
+@end
+
+@interface IMNicknameController : NSObject
++ (instancetype)sharedController;
+- (id)nicknameForHandle:(NSString *)handle;
+@end
+
+@interface IDSIDQueryController : NSObject
++ (instancetype)sharedController;
+- (id)currentIDStatusForDestination:(NSString *)destination service:(id)service;
 @end
 
 #pragma mark - JSON Response Helpers
@@ -345,12 +482,22 @@ static NSDictionary* handleStatus(NSInteger requestId, NSDictionary *params) {
         }
     }
 
+    NSDictionary *selectors = @{
+        @"editMessageItem": @(gHasEditMessageItem),
+        @"editMessage": @(gHasEditMessage),
+        @"retractMessagePart": @(gHasRetractMessagePart),
+        @"sendMessageReason": @(gHasSendMessageReason)
+    };
+
     return successResponse(requestId, @{
         @"injected": @YES,
         @"registry_available": @(hasRegistry),
         @"chat_count": @(chatCount),
         @"typing_available": @(hasRegistry),
-        @"read_available": @(hasRegistry)
+        @"read_available": @(hasRegistry),
+        @"bridge_version": @2,
+        @"v2_ready": @(rpcInboxTimer != nil),
+        @"selectors": selectors
     });
 }
 
@@ -399,7 +546,1286 @@ static NSDictionary* handleListChats(NSInteger requestId, NSDictionary *params) 
     });
 }
 
+#pragma mark - Resolve Chat (v2)
+
+/// Resolve an IMChat from a chatGuid string (BlueBubbles-style addressing,
+/// e.g. `iMessage;-;+15551234567` or `iMessage;+;chat0000`). Falls back to
+/// `chatForIMHandle:` to materialize chats that don't yet exist in the
+/// registry's allExistingChats snapshot. Returns nil if no chat could be
+/// resolved or created.
+static IMChat *resolveChatByGuid(NSString *chatGuid) {
+    if (![chatGuid isKindOfClass:[NSString class]] || chatGuid.length == 0) {
+        return nil;
+    }
+    Class registryClass = NSClassFromString(@"IMChatRegistry");
+    if (!registryClass) return nil;
+    id registry = [registryClass performSelector:@selector(sharedInstance)];
+    if (!registry) return nil;
+
+    if ([registry respondsToSelector:@selector(existingChatWithGUID:)]) {
+        id chat = [registry performSelector:@selector(existingChatWithGUID:)
+                                 withObject:chatGuid];
+        if (chat) return chat;
+    }
+
+    // Fallback: parse trailing address out of `<service>;<+|->;<address>`
+    // and try to vend a handle, then materialize a chat.
+    NSArray *parts = [chatGuid componentsSeparatedByString:@";"];
+    if (parts.count == 3) {
+        NSString *address = parts.lastObject;
+        Class hrClass = NSClassFromString(@"IMHandleRegistrar");
+        if (hrClass) {
+            id hr = [hrClass performSelector:@selector(sharedInstance)];
+            if ([hr respondsToSelector:@selector(IMHandleWithID:)]) {
+                id handle = [hr performSelector:@selector(IMHandleWithID:)
+                                     withObject:address];
+                if (handle && [registry respondsToSelector:@selector(chatForIMHandle:)]) {
+                    id chat = [registry performSelector:@selector(chatForIMHandle:)
+                                             withObject:handle];
+                    if (chat) return chat;
+                }
+            }
+        }
+    }
+    return nil;
+}
+
+/// Resolve a chat by EITHER chatGuid (preferred) OR a free-form handle
+/// (legacy path that walks `findChat`). Used to keep existing callers working.
+static id resolveChatFlexible(NSDictionary *params) {
+    NSString *chatGuid = params[@"chatGuid"];
+    if ([chatGuid isKindOfClass:[NSString class]] && chatGuid.length) {
+        IMChat *chat = resolveChatByGuid(chatGuid);
+        if (chat) return chat;
+    }
+    NSString *handle = params[@"handle"];
+    if ([handle isKindOfClass:[NSString class]] && handle.length) {
+        return findChat(handle);
+    }
+    return nil;
+}
+
+#pragma mark - AttributedBody Helpers
+
+/// Decode a base64 NSKeyedArchiver blob into an NSAttributedString. Returns
+/// nil on any decoding failure.
+static NSAttributedString *attributedBodyFromBase64(NSString *b64) {
+    if (![b64 isKindOfClass:[NSString class]] || b64.length == 0) return nil;
+    NSData *data = [[NSData alloc] initWithBase64EncodedString:b64
+                                                       options:NSDataBase64DecodingIgnoreUnknownCharacters];
+    if (!data) return nil;
+    NSError *err = nil;
+    NSSet *allowed = [NSSet setWithObjects:
+        [NSAttributedString class], [NSDictionary class], [NSString class],
+        [NSArray class], [NSNumber class], [NSURL class], [NSData class], nil];
+    NSAttributedString *attr = [NSKeyedUnarchiver unarchivedObjectOfClasses:allowed
+                                                                   fromData:data
+                                                                      error:&err];
+    if (err) {
+        // Fall back to non-secure unarchiving for older blobs.
+        @try {
+            attr = [NSKeyedUnarchiver unarchiveObjectWithData:data];
+        } @catch (__unused NSException *ex) {
+            attr = nil;
+        }
+    }
+    return attr;
+}
+
+/// Build a plain NSAttributedString carrying `text` as message-part `partIndex`.
+/// Applies the private `__kIMMessagePartAttributeName` attribute IMCore expects.
+static NSAttributedString *buildPlainAttributed(NSString *text, NSInteger partIndex) {
+    if (![text isKindOfClass:[NSString class]]) text = @"";
+    NSDictionary *attrs = @{
+        @"__kIMMessagePartAttributeName": @(partIndex),
+        @"__kIMBaseWritingDirectionAttributeName": @"-1"
+    };
+    return [[NSAttributedString alloc] initWithString:text attributes:attrs];
+}
+
+#pragma mark - IMMessage Builder
+
+/// Build an IMMessage suitable for `[chat sendMessage:]`. Handles plain text,
+/// optional subject, optional effect (`com.apple.MobileSMS.expressivesend.*`),
+/// optional reply target (`selectedMessageGuid`), and ddScan flag.
+static id buildIMMessage(NSAttributedString *body,
+                         NSAttributedString *subject,
+                         NSString *effectId,
+                         NSString *threadIdentifier,
+                         NSString *associatedMessageGuid,
+                         long long associatedMessageType,
+                         NSRange associatedMessageRange,
+                         NSDictionary *summaryInfo,
+                         NSArray *fileTransferGuids,
+                         BOOL isAudioMessage,
+                         BOOL ddScan) {
+    Class messageClass = NSClassFromString(@"IMMessage");
+    if (!messageClass) return nil;
+
+    // Reaction / reply path: associatedMessageGuid + associatedMessageType.
+    if (associatedMessageGuid.length && associatedMessageType > 0) {
+        SEL sel = @selector(initIMMessageWithSender:time:text:messageSubject:fileTransferGUIDs:flags:error:guid:subject:balloonBundleID:payloadData:expressiveSendStyleID:associatedMessageGUID:associatedMessageType:associatedMessageRange:messageSummaryInfo:);
+        id msg = [messageClass alloc];
+        if ([msg respondsToSelector:sel]) {
+            unsigned long long flags = 0x5;
+            NSMethodSignature *sig = [messageClass instanceMethodSignatureForSelector:sel];
+            NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
+            [inv setSelector:sel];
+            [inv setTarget:msg];
+            id nilObj = nil;
+            NSDate *now = [NSDate date];
+            [inv setArgument:&nilObj atIndex:2];        // sender
+            [inv setArgument:&now atIndex:3];           // time
+            [inv setArgument:&body atIndex:4];          // text
+            [inv setArgument:&subject atIndex:5];       // messageSubject
+            [inv setArgument:&fileTransferGuids atIndex:6];
+            [inv setArgument:&flags atIndex:7];
+            [inv setArgument:&nilObj atIndex:8];        // error
+            [inv setArgument:&nilObj atIndex:9];        // guid
+            [inv setArgument:&nilObj atIndex:10];       // subject (string form)
+            [inv setArgument:&nilObj atIndex:11];       // balloonBundleID
+            [inv setArgument:&nilObj atIndex:12];       // payloadData
+            [inv setArgument:&effectId atIndex:13];     // expressiveSendStyleID
+            [inv setArgument:&associatedMessageGuid atIndex:14];
+            [inv setArgument:&associatedMessageType atIndex:15];
+            [inv setArgument:&associatedMessageRange atIndex:16];
+            [inv setArgument:&summaryInfo atIndex:17];
+            [inv invoke];
+            __unsafe_unretained id result = nil;
+            [inv getReturnValue:&result];
+            return result;
+        }
+    }
+
+    // Normal send / reply path.
+    SEL sel = @selector(initIMMessageWithSender:time:text:messageSubject:fileTransferGUIDs:flags:error:guid:subject:balloonBundleID:payloadData:expressiveSendStyleID:);
+    id msg = [messageClass alloc];
+    if ([msg respondsToSelector:sel]) {
+        unsigned long long flags;
+        if (isAudioMessage) {
+            flags = 0x300005ULL;
+        } else if (subject.length) {
+            flags = 0x10000dULL;
+        } else {
+            flags = 0x100005ULL;
+        }
+        NSMethodSignature *sig = [messageClass instanceMethodSignatureForSelector:sel];
+        NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
+        [inv setSelector:sel];
+        [inv setTarget:msg];
+        id nilObj = nil;
+        NSDate *now = [NSDate date];
+        [inv setArgument:&nilObj atIndex:2];           // sender
+        [inv setArgument:&now atIndex:3];              // time
+        [inv setArgument:&body atIndex:4];             // text
+        [inv setArgument:&subject atIndex:5];          // messageSubject
+        [inv setArgument:&fileTransferGuids atIndex:6];
+        [inv setArgument:&flags atIndex:7];
+        [inv setArgument:&nilObj atIndex:8];           // error
+        [inv setArgument:&nilObj atIndex:9];           // guid
+        [inv setArgument:&nilObj atIndex:10];          // subject string
+        [inv setArgument:&nilObj atIndex:11];          // balloonBundleID
+        [inv setArgument:&nilObj atIndex:12];          // payloadData
+        [inv setArgument:&effectId atIndex:13];        // expressiveSendStyleID
+        [inv invoke];
+        __unsafe_unretained id result = nil;
+        [inv getReturnValue:&result];
+        return result;
+    }
+
+    // Last resort: simplest 2-arg initializer if the long form isn't available.
+    SEL simple = @selector(initWithText:flags:);
+    if ([msg respondsToSelector:simple]) {
+        unsigned long long flags = 0x100005ULL;
+        NSMethodSignature *sig2 = [messageClass instanceMethodSignatureForSelector:simple];
+        NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig2];
+        [inv setSelector:simple];
+        [inv setTarget:msg];
+        [inv setArgument:&body atIndex:2];
+        [inv setArgument:&flags atIndex:3];
+        [inv invoke];
+        __unsafe_unretained id result = nil;
+        [inv getReturnValue:&result];
+        return result;
+    }
+    return nil;
+}
+
+/// Async chat-item lookup. Calls cb on the main thread once items are loaded
+/// (or with nil if loading times out / no match). Note: the Messages.app
+/// IMChatHistoryController loads asynchronously into chat.chatItems; we issue
+/// the load and then poll for the matching guid.
+static void getMessageItem(IMChat *chat, NSString *messageGuid,
+                           void (^cb)(id messageItem)) {
+    if (!chat || !messageGuid.length) {
+        if (cb) cb(nil);
+        return;
+    }
+    Class hcClass = NSClassFromString(@"IMChatHistoryController");
+    id hc = hcClass ? [hcClass performSelector:@selector(sharedInstance)] : nil;
+    if (hc && [hc respondsToSelector:@selector(loadedChatItemsForChat:beforeDate:limit:loadIfNeeded:)]) {
+        NSMethodSignature *sig = [hc methodSignatureForSelector:
+            @selector(loadedChatItemsForChat:beforeDate:limit:loadIfNeeded:)];
+        NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
+        [inv setSelector:@selector(loadedChatItemsForChat:beforeDate:limit:loadIfNeeded:)];
+        [inv setTarget:hc];
+        [inv setArgument:&chat atIndex:2];
+        NSDate *now = [NSDate date];
+        [inv setArgument:&now atIndex:3];
+        NSUInteger limit = 100;
+        [inv setArgument:&limit atIndex:4];
+        BOOL load = YES;
+        [inv setArgument:&load atIndex:5];
+        [inv invoke];
+    }
+
+    // Poll chat.chatItems for the guid for up to 2s.
+    __block NSInteger attempts = 0;
+    __block dispatch_block_t blk = nil;
+    blk = ^{
+        attempts++;
+        NSArray *items = nil;
+        if ([chat respondsToSelector:@selector(chatItems)]) {
+            items = [chat performSelector:@selector(chatItems)];
+        }
+        for (id item in items) {
+            id message = nil;
+            if ([item respondsToSelector:@selector(message)]) {
+                message = [item performSelector:@selector(message)];
+            }
+            NSString *guid = nil;
+            if (message && [message respondsToSelector:@selector(guid)]) {
+                guid = [message performSelector:@selector(guid)];
+            } else if ([item respondsToSelector:@selector(guid)]) {
+                guid = [item performSelector:@selector(guid)];
+            }
+            if ([guid isEqualToString:messageGuid]) {
+                if (cb) cb(item);
+                blk = nil;
+                return;
+            }
+        }
+        if (attempts < 20) {
+            dispatch_block_t self_blk = blk;
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 100 * NSEC_PER_MSEC),
+                           dispatch_get_main_queue(), self_blk);
+        } else {
+            if (cb) cb(nil);
+            blk = nil;
+        }
+    };
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 50 * NSEC_PER_MSEC),
+                   dispatch_get_main_queue(), blk);
+}
+
+/// Best-effort messageGuid extractor for transactional sends. Returns the
+/// guid of `chat.lastSentMessage` after a brief grace period for the message
+/// to register, or nil if unavailable.
+static NSString *lastSentMessageGuid(IMChat *chat) {
+    if (!chat || ![chat respondsToSelector:@selector(lastSentMessage)]) return nil;
+    id msg = [chat performSelector:@selector(lastSentMessage)];
+    if (msg && [msg respondsToSelector:@selector(guid)]) {
+        return [msg performSelector:@selector(guid)];
+    }
+    return nil;
+}
+
+#pragma mark - v2 Response Helpers
+
+/// Build a v2-shaped success envelope: { v:2, id, success:true, data:{...} }
+static NSDictionary* successResponseV2(NSString *uuid, NSDictionary *data) {
+    return @{
+        @"v": @2,
+        @"id": uuid ?: @"",
+        @"success": @YES,
+        @"data": data ?: @{},
+        @"timestamp": [[NSISO8601DateFormatter new] stringFromDate:[NSDate date]]
+    };
+}
+
+/// Build a v2-shaped error envelope.
+static NSDictionary* errorResponseV2(NSString *uuid, NSString *error) {
+    return @{
+        @"v": @2,
+        @"id": uuid ?: @"",
+        @"success": @NO,
+        @"error": error ?: @"Unknown error",
+        @"timestamp": [[NSISO8601DateFormatter new] stringFromDate:[NSDate date]]
+    };
+}
+
+#pragma mark - Inbound Events (v2)
+
+/// Append a single JSON object as a line to `.imsg-events.jsonl`. Rotates the
+/// file once it crosses kEventsRotateBytes by renaming to `.1` (overwriting).
+/// Safe to call from any thread (guarded by an unfair lock).
+__attribute__((unused))
+static void appendEvent(NSDictionary *evt) {
+    if (![evt isKindOfClass:[NSDictionary class]]) return;
+    initFilePaths();
+
+    NSMutableDictionary *out = [NSMutableDictionary dictionaryWithDictionary:evt];
+    if (out[@"ts"] == nil) {
+        out[@"ts"] = [[NSISO8601DateFormatter new] stringFromDate:[NSDate date]];
+    }
+
+    NSError *err = nil;
+    NSData *body = [NSJSONSerialization dataWithJSONObject:out options:0 error:&err];
+    if (!body) return;
+
+    os_unfair_lock_lock(&eventsLock);
+
+    // Rotate if oversized.
+    struct stat st;
+    if (stat(kEventsFile.UTF8String, &st) == 0 && st.st_size >= (off_t)kEventsRotateBytes) {
+        rename(kEventsFile.UTF8String, kEventsRotated.UTF8String);
+    }
+
+    FILE *fp = fopen(kEventsFile.UTF8String, "a");
+    if (fp != NULL) {
+        fwrite(body.bytes, 1, body.length, fp);
+        fputc('\n', fp);
+        fclose(fp);
+    }
+
+    os_unfair_lock_unlock(&eventsLock);
+}
+
+#pragma mark - Send Handlers (v2)
+
+/// Implementation core for `send-message`. Builds an IMMessage with optional
+/// effect/subject/reply and dispatches via `[chat sendMessage:]`. ddScan on
+/// macOS 13+ defers the send by 100ms.
+static NSDictionary *handleSendMessage(NSInteger requestId, NSDictionary *params) {
+    NSString *chatGuid = params[@"chatGuid"];
+    NSString *message = params[@"message"];
+    NSString *effectId = params[@"effectId"];
+    NSString *subject = params[@"subject"];
+    NSString *selectedMessageGuid = params[@"selectedMessageGuid"];
+    NSNumber *partIndexNum = params[@"partIndex"];
+    NSInteger partIndex = partIndexNum ? [partIndexNum integerValue] : 0;
+    NSNumber *ddScanNum = params[@"ddScan"];
+    BOOL ddScan = [ddScanNum boolValue];
+    NSString *attributedBodyB64 = params[@"attributedBody"];
+
+    if (!chatGuid.length) return errorResponse(requestId, @"Missing chatGuid");
+    if (!message) message = @"";
+
+    IMChat *chat = resolveChatByGuid(chatGuid);
+    if (!chat) {
+        return errorResponse(requestId,
+            [NSString stringWithFormat:@"Chat not found: %@", chatGuid]);
+    }
+
+    NSAttributedString *body = attributedBodyFromBase64(attributedBodyB64);
+    if (!body) {
+        body = buildPlainAttributed(message, partIndex);
+    }
+    NSAttributedString *subjectAttr = subject.length
+        ? buildPlainAttributed(subject, 0)
+        : nil;
+
+    NSRange zeroRange = NSMakeRange(0, body.length);
+
+    @try {
+        id imMessage = buildIMMessage(body, subjectAttr,
+                                      effectId,
+                                      /*threadIdentifier*/ nil,
+                                      selectedMessageGuid,
+                                      /*associatedMessageType*/ 0,
+                                      zeroRange,
+                                      /*summaryInfo*/ nil,
+                                      /*fileTransferGuids*/ @[],
+                                      /*isAudio*/ NO,
+                                      ddScan);
+        if (!imMessage) {
+            return errorResponse(requestId, @"Could not construct IMMessage");
+        }
+
+        if (gHasSendMessageReason && ddScan) {
+            // Deferred-send path on macOS 13+: sleep 100ms, then call
+            // `sendMessage:reason:` so the spam filter can run on the body.
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 100 * NSEC_PER_MSEC),
+                           dispatch_get_main_queue(), ^{
+                NSMethodSignature *sig = [chat methodSignatureForSelector:
+                    @selector(sendMessage:reason:)];
+                NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
+                [inv setSelector:@selector(sendMessage:reason:)];
+                [inv setTarget:chat];
+                __unsafe_unretained id arg = imMessage;
+                [inv setArgument:&arg atIndex:2];
+                NSInteger reason = 0;
+                [inv setArgument:&reason atIndex:3];
+                [inv invoke];
+            });
+        } else {
+            [chat performSelector:@selector(sendMessage:) withObject:imMessage];
+        }
+
+        // Best-effort messageGuid; not always available immediately.
+        NSString *guid = lastSentMessageGuid(chat);
+        return successResponse(requestId, @{
+            @"chatGuid": chatGuid,
+            @"messageGuid": guid ?: @"",
+            @"queued": @(ddScan)
+        });
+    } @catch (NSException *exception) {
+        return errorResponse(requestId,
+            [NSString stringWithFormat:@"send-message failed: %@", exception.reason]);
+    }
+}
+
+/// `send-multipart`: at minimum, sends an attributedBody composed of multiple
+/// text parts. v1 supports text-only multipart; mention/file parts can land in
+/// a follow-up.
+static NSDictionary *handleSendMultipart(NSInteger requestId, NSDictionary *params) {
+    NSString *chatGuid = params[@"chatGuid"];
+    NSArray *parts = params[@"parts"];
+    NSString *effectId = params[@"effectId"];
+    NSString *subject = params[@"subject"];
+    NSString *selectedMessageGuid = params[@"selectedMessageGuid"];
+
+    if (!chatGuid.length) return errorResponse(requestId, @"Missing chatGuid");
+    if (![parts isKindOfClass:[NSArray class]] || parts.count == 0) {
+        return errorResponse(requestId, @"Missing or empty parts array");
+    }
+
+    IMChat *chat = resolveChatByGuid(chatGuid);
+    if (!chat) {
+        return errorResponse(requestId,
+            [NSString stringWithFormat:@"Chat not found: %@", chatGuid]);
+    }
+
+    NSMutableAttributedString *body = [[NSMutableAttributedString alloc] init];
+    NSInteger partIndex = 0;
+    for (NSDictionary *part in parts) {
+        if (![part isKindOfClass:[NSDictionary class]]) continue;
+        NSString *text = part[@"text"];
+        if (!text.length) continue;
+        NSAttributedString *seg = buildPlainAttributed(text, partIndex);
+        [body appendAttributedString:seg];
+        partIndex++;
+    }
+    if (body.length == 0) {
+        return errorResponse(requestId, @"No usable parts");
+    }
+
+    NSAttributedString *subjectAttr = subject.length
+        ? buildPlainAttributed(subject, 0)
+        : nil;
+
+    @try {
+        id imMessage = buildIMMessage(body, subjectAttr, effectId, nil,
+                                      selectedMessageGuid, 0,
+                                      NSMakeRange(0, body.length),
+                                      nil, @[], NO, NO);
+        if (!imMessage) {
+            return errorResponse(requestId, @"Could not construct multipart IMMessage");
+        }
+        [chat performSelector:@selector(sendMessage:) withObject:imMessage];
+        NSString *guid = lastSentMessageGuid(chat);
+        return successResponse(requestId, @{
+            @"chatGuid": chatGuid,
+            @"messageGuid": guid ?: @"",
+            @"parts_count": @(partIndex)
+        });
+    } @catch (NSException *exception) {
+        return errorResponse(requestId,
+            [NSString stringWithFormat:@"send-multipart failed: %@", exception.reason]);
+    }
+}
+
+/// `send-attachment`: registers the file via IMFileTransferCenter and sends a
+/// (typically empty-body) message referencing that transfer guid.
+static NSDictionary *handleSendAttachment(NSInteger requestId, NSDictionary *params) {
+    NSString *chatGuid = params[@"chatGuid"];
+    NSString *filePath = params[@"filePath"];
+    NSNumber *audioFlag = params[@"isAudioMessage"];
+    BOOL isAudio = [audioFlag boolValue];
+
+    if (!chatGuid.length) return errorResponse(requestId, @"Missing chatGuid");
+    if (!filePath.length) return errorResponse(requestId, @"Missing filePath");
+    if (![[NSFileManager defaultManager] fileExistsAtPath:filePath]) {
+        return errorResponse(requestId,
+            [NSString stringWithFormat:@"File not found: %@", filePath]);
+    }
+
+    IMChat *chat = resolveChatByGuid(chatGuid);
+    if (!chat) {
+        return errorResponse(requestId,
+            [NSString stringWithFormat:@"Chat not found: %@", chatGuid]);
+    }
+
+    Class ftcClass = NSClassFromString(@"IMFileTransferCenter");
+    if (!ftcClass) {
+        return errorResponse(requestId, @"IMFileTransferCenter not available");
+    }
+    id ftc = [ftcClass performSelector:@selector(sharedInstance)];
+    if (!ftc) return errorResponse(requestId, @"FileTransferCenter unavailable");
+
+    NSURL *fileURL = [NSURL fileURLWithPath:filePath];
+    @try {
+        id transferGuid = nil;
+        if ([ftc respondsToSelector:@selector(guidForNewOutgoingTransferWithLocalURL:)]) {
+            transferGuid = [ftc performSelector:
+                @selector(guidForNewOutgoingTransferWithLocalURL:)
+                                     withObject:fileURL];
+        }
+        if (![transferGuid isKindOfClass:[NSString class]] || ![(NSString *)transferGuid length]) {
+            return errorResponse(requestId, @"Could not register attachment transfer");
+        }
+
+        NSAttributedString *body = buildPlainAttributed(@"￼", 0); // OBJ replacement char
+        id imMessage = buildIMMessage(body, nil, nil, nil, nil, 0,
+                                      NSMakeRange(0, body.length), nil,
+                                      @[transferGuid], isAudio, NO);
+        if (!imMessage) {
+            return errorResponse(requestId, @"Could not build IMMessage with attachment");
+        }
+        [chat performSelector:@selector(sendMessage:) withObject:imMessage];
+        NSString *guid = lastSentMessageGuid(chat);
+        return successResponse(requestId, @{
+            @"chatGuid": chatGuid,
+            @"messageGuid": guid ?: @"",
+            @"transferGuid": transferGuid
+        });
+    } @catch (NSException *exception) {
+        return errorResponse(requestId,
+            [NSString stringWithFormat:@"send-attachment failed: %@", exception.reason]);
+    }
+}
+
+/// `send-reaction`: builds a reaction IMMessage tied to the target guid.
+static NSDictionary *handleSendReaction(NSInteger requestId, NSDictionary *params) {
+    NSString *chatGuid = params[@"chatGuid"];
+    NSString *selectedMessageGuid = params[@"selectedMessageGuid"];
+    NSString *reactionType = params[@"reactionType"];
+    NSNumber *partIndexNum = params[@"partIndex"];
+    NSInteger partIndex = partIndexNum ? [partIndexNum integerValue] : 0;
+
+    if (!chatGuid.length) return errorResponse(requestId, @"Missing chatGuid");
+    if (!selectedMessageGuid.length) return errorResponse(requestId, @"Missing selectedMessageGuid");
+    if (!reactionType.length) return errorResponse(requestId, @"Missing reactionType");
+
+    IMChat *chat = resolveChatByGuid(chatGuid);
+    if (!chat) {
+        return errorResponse(requestId,
+            [NSString stringWithFormat:@"Chat not found: %@", chatGuid]);
+    }
+
+    long long associatedType = -1;
+    NSDictionary *kindMap = @{
+        @"love": @2000, @"like": @2001, @"dislike": @2002,
+        @"laugh": @2003, @"emphasize": @2004, @"question": @2005,
+        @"remove-love": @3000, @"remove-like": @3001, @"remove-dislike": @3002,
+        @"remove-laugh": @3003, @"remove-emphasize": @3004, @"remove-question": @3005,
+    };
+    NSNumber *typeNum = kindMap[reactionType.lowercaseString];
+    if (typeNum) associatedType = [typeNum longLongValue];
+    if (associatedType <= 0) {
+        return errorResponse(requestId,
+            [NSString stringWithFormat:@"Unknown reactionType: %@", reactionType]);
+    }
+
+    NSAttributedString *body = buildPlainAttributed(@"", partIndex);
+    NSDictionary *summary = @{
+        @"amc": selectedMessageGuid,
+        @"ams": @"",
+    };
+    @try {
+        id imMessage = buildIMMessage(body, nil, nil, nil,
+                                      selectedMessageGuid,
+                                      associatedType,
+                                      NSMakeRange(0, 1),
+                                      summary,
+                                      @[], NO, NO);
+        if (!imMessage) {
+            return errorResponse(requestId, @"Could not build reaction IMMessage");
+        }
+        [chat performSelector:@selector(sendMessage:) withObject:imMessage];
+        NSString *guid = lastSentMessageGuid(chat);
+        return successResponse(requestId, @{
+            @"chatGuid": chatGuid,
+            @"selectedMessageGuid": selectedMessageGuid,
+            @"reactionType": reactionType,
+            @"messageGuid": guid ?: @""
+        });
+    } @catch (NSException *exception) {
+        return errorResponse(requestId,
+            [NSString stringWithFormat:@"send-reaction failed: %@", exception.reason]);
+    }
+}
+
+/// `notify-anyways`: ask Messages.app to deliver a low-priority notification
+/// for a previously-suppressed message guid.
+static NSDictionary *handleNotifyAnyways(NSInteger requestId, NSDictionary *params) {
+    NSString *chatGuid = params[@"chatGuid"];
+    NSString *messageGuid = params[@"messageGuid"];
+
+    if (!chatGuid.length) return errorResponse(requestId, @"Missing chatGuid");
+    if (!messageGuid.length) return errorResponse(requestId, @"Missing messageGuid");
+
+    IMChat *chat = resolveChatByGuid(chatGuid);
+    if (!chat) {
+        return errorResponse(requestId,
+            [NSString stringWithFormat:@"Chat not found: %@", chatGuid]);
+    }
+
+    @try {
+        SEL sel = @selector(sendMessageAcknowledgment:forChatItem:withMessageSummaryInfo:withGuid:);
+        if (![chat respondsToSelector:sel]) {
+            return errorResponse(requestId, @"sendMessageAcknowledgment: not available");
+        }
+        getMessageItem(chat, messageGuid, ^(id item) {
+            if (!item) return;
+            @try {
+                NSMethodSignature *sig = [chat methodSignatureForSelector:sel];
+                NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
+                [inv setSelector:sel];
+                [inv setTarget:chat];
+                NSInteger ack = 1000;
+                [inv setArgument:&ack atIndex:2];
+                __unsafe_unretained id ci = item;
+                [inv setArgument:&ci atIndex:3];
+                NSDictionary *empty = @{};
+                [inv setArgument:&empty atIndex:4];
+                __unsafe_unretained NSString *nilGuid = nil;
+                [inv setArgument:&nilGuid atIndex:5];
+                [inv invoke];
+            } @catch (__unused NSException *ex) {}
+        });
+        return successResponse(requestId, @{
+            @"chatGuid": chatGuid, @"messageGuid": messageGuid, @"queued": @YES
+        });
+    } @catch (NSException *exception) {
+        return errorResponse(requestId,
+            [NSString stringWithFormat:@"notify-anyways failed: %@", exception.reason]);
+    }
+}
+
+#pragma mark - Mutate Handlers (v2)
+
+/// `edit-message`: rewrite an existing message via the edit selector
+/// appropriate for the running macOS. Preserves BB's "Compatability" typo.
+static NSDictionary *handleEditMessage(NSInteger requestId, NSDictionary *params) {
+    NSString *chatGuid = params[@"chatGuid"];
+    NSString *messageGuid = params[@"messageGuid"];
+    NSString *newText = params[@"editedMessage"];
+    NSString *bcText = params[@"backwardsCompatibilityMessage"]
+                     ?: params[@"backwardCompatibilityMessage"];
+    NSNumber *partIndexNum = params[@"partIndex"];
+    NSInteger partIndex = partIndexNum ? [partIndexNum integerValue] : 0;
+
+    if (!chatGuid.length) return errorResponse(requestId, @"Missing chatGuid");
+    if (!messageGuid.length) return errorResponse(requestId, @"Missing messageGuid");
+    if (!newText.length) return errorResponse(requestId, @"Missing editedMessage");
+    if (!bcText) bcText = newText;
+
+    IMChat *chat = resolveChatByGuid(chatGuid);
+    if (!chat) {
+        return errorResponse(requestId,
+            [NSString stringWithFormat:@"Chat not found: %@", chatGuid]);
+    }
+    if (!gHasEditMessageItem && !gHasEditMessage) {
+        return errorResponse(requestId, @"No edit-message selector available on this macOS");
+    }
+
+    NSAttributedString *newBody = buildPlainAttributed(newText, partIndex);
+
+    getMessageItem(chat, messageGuid, ^(id item) {
+        if (!item) return;
+        @try {
+            NSInteger localPartIndex = partIndex;
+            if (gHasEditMessageItem) {
+                SEL sel = @selector(editMessageItem:atPartIndex:withNewPartText:backwardCompatabilityText:);
+                NSMethodSignature *sig = [chat methodSignatureForSelector:sel];
+                NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
+                [inv setSelector:sel];
+                [inv setTarget:chat];
+                __unsafe_unretained id ci = item;
+                [inv setArgument:&ci atIndex:2];
+                [inv setArgument:&localPartIndex atIndex:3];
+                __unsafe_unretained NSAttributedString *newBodyArg = newBody;
+                [inv setArgument:&newBodyArg atIndex:4];
+                __unsafe_unretained NSString *bcArg = bcText;
+                [inv setArgument:&bcArg atIndex:5];
+                [inv invoke];
+                return;
+            }
+            // macOS 13 path
+            SEL sel = @selector(editMessage:atPartIndex:withNewPartText:backwardCompatabilityText:);
+            id message = nil;
+            if ([item respondsToSelector:@selector(message)]) {
+                message = [item performSelector:@selector(message)];
+            }
+            if (!message) return;
+            NSMethodSignature *sig = [chat methodSignatureForSelector:sel];
+            NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
+            [inv setSelector:sel];
+            [inv setTarget:chat];
+            __unsafe_unretained id msg = message;
+            [inv setArgument:&msg atIndex:2];
+            [inv setArgument:&localPartIndex atIndex:3];
+            __unsafe_unretained NSAttributedString *newBodyArg = newBody;
+            [inv setArgument:&newBodyArg atIndex:4];
+            __unsafe_unretained NSString *bcArg = bcText;
+            [inv setArgument:&bcArg atIndex:5];
+            [inv invoke];
+        } @catch (__unused NSException *ex) {}
+    });
+
+    return successResponse(requestId, @{
+        @"chatGuid": chatGuid,
+        @"messageGuid": messageGuid,
+        @"queued": @YES
+    });
+}
+
+/// `unsend-message`: retract a part of a sent message via retractMessagePart:.
+static NSDictionary *handleUnsendMessage(NSInteger requestId, NSDictionary *params) {
+    NSString *chatGuid = params[@"chatGuid"];
+    NSString *messageGuid = params[@"messageGuid"];
+    NSNumber *partIndexNum = params[@"partIndex"];
+    NSInteger partIndex = partIndexNum ? [partIndexNum integerValue] : 0;
+
+    if (!chatGuid.length) return errorResponse(requestId, @"Missing chatGuid");
+    if (!messageGuid.length) return errorResponse(requestId, @"Missing messageGuid");
+
+    IMChat *chat = resolveChatByGuid(chatGuid);
+    if (!chat) {
+        return errorResponse(requestId,
+            [NSString stringWithFormat:@"Chat not found: %@", chatGuid]);
+    }
+    if (!gHasRetractMessagePart) {
+        return errorResponse(requestId, @"retractMessagePart: not available on this macOS");
+    }
+
+    getMessageItem(chat, messageGuid, ^(id messageItem) {
+        if (!messageItem) return;
+        @try {
+            id newChatItems = nil;
+            SEL ncSel = @selector(_newChatItems);
+            if ([messageItem respondsToSelector:ncSel]) {
+                // Route through objc_msgSend to avoid ARC's "performSelector
+                // names a selector which retains the object" warning on the
+                // underscore-prefixed selector.
+                newChatItems = ((id (*)(id, SEL))objc_msgSend)(messageItem, ncSel);
+            }
+            id target = nil;
+            if ([newChatItems isKindOfClass:[NSArray class]]) {
+                NSArray *arr = newChatItems;
+                if (arr.count == 0) target = messageItem;
+                else if (arr.count == 1) target = arr.firstObject;
+                else {
+                    for (id sub in arr) {
+                        // Aggregate attachment unwrap
+                        if ([sub respondsToSelector:@selector(aggregateAttachmentParts)]) {
+                            NSArray *agg = [sub performSelector:@selector(aggregateAttachmentParts)];
+                            for (id p in agg) {
+                                if ([p respondsToSelector:@selector(index)]
+                                    && [(IMMessagePartChatItem *)p index] == partIndex) {
+                                    target = p; break;
+                                }
+                            }
+                            if (target) break;
+                        }
+                        if ([sub respondsToSelector:@selector(index)]
+                            && [(IMMessagePartChatItem *)sub index] == partIndex) {
+                            target = sub; break;
+                        }
+                    }
+                }
+            } else if (newChatItems != nil) {
+                target = newChatItems;
+            } else {
+                target = messageItem;
+            }
+            if (!target) return;
+            [chat performSelector:@selector(retractMessagePart:) withObject:target];
+        } @catch (__unused NSException *ex) {}
+    });
+
+    return successResponse(requestId, @{
+        @"chatGuid": chatGuid,
+        @"messageGuid": messageGuid,
+        @"queued": @YES
+    });
+}
+
+/// `delete-message`: remove a single message from the chat.
+static NSDictionary *handleDeleteMessage(NSInteger requestId, NSDictionary *params) {
+    NSString *chatGuid = params[@"chatGuid"];
+    NSString *messageGuid = params[@"messageGuid"];
+
+    if (!chatGuid.length) return errorResponse(requestId, @"Missing chatGuid");
+    if (!messageGuid.length) return errorResponse(requestId, @"Missing messageGuid");
+
+    IMChat *chat = resolveChatByGuid(chatGuid);
+    if (!chat) {
+        return errorResponse(requestId,
+            [NSString stringWithFormat:@"Chat not found: %@", chatGuid]);
+    }
+
+    SEL sel = @selector(deleteChatItems:);
+    if (![chat respondsToSelector:sel]) {
+        return errorResponse(requestId, @"deleteChatItems: not available");
+    }
+
+    getMessageItem(chat, messageGuid, ^(id item) {
+        if (!item) return;
+        @try {
+            [chat performSelector:sel withObject:@[item]];
+        } @catch (__unused NSException *ex) {}
+    });
+
+    return successResponse(requestId, @{
+        @"chatGuid": chatGuid, @"messageGuid": messageGuid, @"queued": @YES
+    });
+}
+
+#pragma mark - Chat Management Handlers (v2)
+
+static NSDictionary *handleStartTyping(NSInteger requestId, NSDictionary *params) {
+    NSString *chatGuid = params[@"chatGuid"];
+    if (!chatGuid.length) return errorResponse(requestId, @"Missing chatGuid");
+    IMChat *chat = resolveChatByGuid(chatGuid);
+    if (!chat) return errorResponse(requestId, @"Chat not found");
+    @try { [chat setLocalUserIsTyping:YES]; }
+    @catch (NSException *ex) { return errorResponse(requestId, ex.reason ?: @"failed"); }
+    return successResponse(requestId, @{@"chatGuid": chatGuid, @"typing": @YES});
+}
+
+static NSDictionary *handleStopTyping(NSInteger requestId, NSDictionary *params) {
+    NSString *chatGuid = params[@"chatGuid"];
+    if (!chatGuid.length) return errorResponse(requestId, @"Missing chatGuid");
+    IMChat *chat = resolveChatByGuid(chatGuid);
+    if (!chat) return errorResponse(requestId, @"Chat not found");
+    @try { [chat setLocalUserIsTyping:NO]; }
+    @catch (NSException *ex) { return errorResponse(requestId, ex.reason ?: @"failed"); }
+    return successResponse(requestId, @{@"chatGuid": chatGuid, @"typing": @NO});
+}
+
+static NSDictionary *handleCheckTypingStatus(NSInteger requestId, NSDictionary *params) {
+    NSString *chatGuid = params[@"chatGuid"];
+    if (!chatGuid.length) return errorResponse(requestId, @"Missing chatGuid");
+    IMChat *chat = resolveChatByGuid(chatGuid);
+    if (!chat) return errorResponse(requestId, @"Chat not found");
+    BOOL typing = NO;
+    if ([chat respondsToSelector:@selector(isCurrentlyTyping)]) {
+        typing = ((BOOL (*)(id, SEL))objc_msgSend)(chat, @selector(isCurrentlyTyping));
+    }
+    return successResponse(requestId, @{@"chatGuid": chatGuid, @"typing": @(typing)});
+}
+
+static NSDictionary *handleMarkChatRead(NSInteger requestId, NSDictionary *params) {
+    NSString *chatGuid = params[@"chatGuid"];
+    NSString *handle = params[@"handle"];
+    id chat = nil;
+    if (chatGuid.length) chat = resolveChatByGuid(chatGuid);
+    if (!chat && handle.length) chat = findChat(handle);
+    if (!chat) return errorResponse(requestId, @"Chat not found");
+    @try { [chat performSelector:@selector(markAllMessagesAsRead)]; }
+    @catch (NSException *ex) { return errorResponse(requestId, ex.reason ?: @"failed"); }
+    return successResponse(requestId, @{@"chatGuid": chatGuid ?: @"", @"marked_as_read": @YES});
+}
+
+static NSDictionary *handleMarkChatUnread(NSInteger requestId, NSDictionary *params) {
+    NSString *chatGuid = params[@"chatGuid"];
+    if (!chatGuid.length) return errorResponse(requestId, @"Missing chatGuid");
+    IMChat *chat = resolveChatByGuid(chatGuid);
+    if (!chat) return errorResponse(requestId, @"Chat not found");
+    @try {
+        if ([chat respondsToSelector:@selector(setUnreadCount:)]) {
+            [chat performSelector:@selector(setUnreadCount:) withObject:@(1)];
+        } else {
+            return errorResponse(requestId, @"setUnreadCount: not available");
+        }
+    } @catch (NSException *ex) { return errorResponse(requestId, ex.reason ?: @"failed"); }
+    return successResponse(requestId, @{@"chatGuid": chatGuid, @"marked_as_unread": @YES});
+}
+
+static NSDictionary *handleAddParticipant(NSInteger requestId, NSDictionary *params) {
+    NSString *chatGuid = params[@"chatGuid"];
+    NSString *address = params[@"address"];
+    if (!chatGuid.length) return errorResponse(requestId, @"Missing chatGuid");
+    if (!address.length) return errorResponse(requestId, @"Missing address");
+    IMChat *chat = resolveChatByGuid(chatGuid);
+    if (!chat) return errorResponse(requestId, @"Chat not found");
+
+    Class hrClass = NSClassFromString(@"IMHandleRegistrar");
+    id hr = hrClass ? [hrClass performSelector:@selector(sharedInstance)] : nil;
+    id handle = (hr && [hr respondsToSelector:@selector(IMHandleWithID:)])
+        ? [hr performSelector:@selector(IMHandleWithID:) withObject:address]
+        : nil;
+    if (!handle) return errorResponse(requestId, @"Could not vend handle");
+
+    @try {
+        SEL sel = @selector(addParticipantsToiMessageChat:reason:);
+        if (![chat respondsToSelector:sel]) {
+            return errorResponse(requestId, @"addParticipantsToiMessageChat:reason: not available");
+        }
+        NSMethodSignature *sig = [chat methodSignatureForSelector:sel];
+        NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
+        [inv setSelector:sel];
+        [inv setTarget:chat];
+        NSArray *handles = @[handle];
+        [inv setArgument:&handles atIndex:2];
+        NSInteger reason = 0;
+        [inv setArgument:&reason atIndex:3];
+        [inv invoke];
+    } @catch (NSException *ex) { return errorResponse(requestId, ex.reason ?: @"failed"); }
+    return successResponse(requestId, @{@"chatGuid": chatGuid, @"address": address, @"added": @YES});
+}
+
+static NSDictionary *handleRemoveParticipant(NSInteger requestId, NSDictionary *params) {
+    NSString *chatGuid = params[@"chatGuid"];
+    NSString *address = params[@"address"];
+    if (!chatGuid.length) return errorResponse(requestId, @"Missing chatGuid");
+    if (!address.length) return errorResponse(requestId, @"Missing address");
+    IMChat *chat = resolveChatByGuid(chatGuid);
+    if (!chat) return errorResponse(requestId, @"Chat not found");
+
+    // Find the matching participant handle on the chat itself.
+    id targetHandle = nil;
+    if ([chat respondsToSelector:@selector(participants)]) {
+        for (id h in [chat performSelector:@selector(participants)]) {
+            if ([h respondsToSelector:@selector(ID)]
+                && [[h performSelector:@selector(ID)] isEqualToString:address]) {
+                targetHandle = h; break;
+            }
+        }
+    }
+    if (!targetHandle) return errorResponse(requestId, @"Participant not found on chat");
+
+    @try {
+        SEL sel = @selector(removeParticipantsFromiMessageChat:reason:);
+        if (![chat respondsToSelector:sel]) {
+            return errorResponse(requestId, @"removeParticipantsFromiMessageChat:reason: not available");
+        }
+        NSMethodSignature *sig = [chat methodSignatureForSelector:sel];
+        NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
+        [inv setSelector:sel];
+        [inv setTarget:chat];
+        NSArray *handles = @[targetHandle];
+        [inv setArgument:&handles atIndex:2];
+        NSInteger reason = 0;
+        [inv setArgument:&reason atIndex:3];
+        [inv invoke];
+    } @catch (NSException *ex) { return errorResponse(requestId, ex.reason ?: @"failed"); }
+    return successResponse(requestId, @{@"chatGuid": chatGuid, @"address": address, @"removed": @YES});
+}
+
+static NSDictionary *handleSetDisplayName(NSInteger requestId, NSDictionary *params) {
+    NSString *chatGuid = params[@"chatGuid"];
+    NSString *newName = params[@"newName"] ?: params[@"name"];
+    if (!chatGuid.length) return errorResponse(requestId, @"Missing chatGuid");
+    IMChat *chat = resolveChatByGuid(chatGuid);
+    if (!chat) return errorResponse(requestId, @"Chat not found");
+    @try {
+        if ([chat respondsToSelector:@selector(setDisplayName:)]) {
+            [chat performSelector:@selector(setDisplayName:) withObject:newName ?: @""];
+        } else {
+            return errorResponse(requestId, @"setDisplayName: not available");
+        }
+    } @catch (NSException *ex) { return errorResponse(requestId, ex.reason ?: @"failed"); }
+    return successResponse(requestId, @{@"chatGuid": chatGuid, @"name": newName ?: @""});
+}
+
+static NSDictionary *handleUpdateGroupPhoto(NSInteger requestId, NSDictionary *params) {
+    NSString *chatGuid = params[@"chatGuid"];
+    NSString *filePath = params[@"filePath"];
+    if (!chatGuid.length) return errorResponse(requestId, @"Missing chatGuid");
+    IMChat *chat = resolveChatByGuid(chatGuid);
+    if (!chat) return errorResponse(requestId, @"Chat not found");
+
+    NSData *photoData = nil;
+    if (filePath.length) {
+        photoData = [NSData dataWithContentsOfFile:filePath];
+        if (!photoData) {
+            return errorResponse(requestId,
+                [NSString stringWithFormat:@"Could not read photo: %@", filePath]);
+        }
+    }
+    @try {
+        SEL sel = @selector(setGroupPhotoData:);
+        if (![chat respondsToSelector:sel]) {
+            return errorResponse(requestId, @"setGroupPhotoData: not available");
+        }
+        [chat performSelector:sel withObject:photoData];
+    } @catch (NSException *ex) { return errorResponse(requestId, ex.reason ?: @"failed"); }
+    return successResponse(requestId, @{
+        @"chatGuid": chatGuid,
+        @"cleared": @(filePath.length == 0),
+        @"size": @(photoData.length)
+    });
+}
+
+static NSDictionary *handleLeaveChat(NSInteger requestId, NSDictionary *params) {
+    NSString *chatGuid = params[@"chatGuid"];
+    if (!chatGuid.length) return errorResponse(requestId, @"Missing chatGuid");
+    IMChat *chat = resolveChatByGuid(chatGuid);
+    if (!chat) return errorResponse(requestId, @"Chat not found");
+    @try {
+        if ([chat respondsToSelector:@selector(leaveChat)]) {
+            [chat performSelector:@selector(leaveChat)];
+        } else {
+            return errorResponse(requestId, @"leaveChat not available");
+        }
+    } @catch (NSException *ex) { return errorResponse(requestId, ex.reason ?: @"failed"); }
+    return successResponse(requestId, @{@"chatGuid": chatGuid, @"left": @YES});
+}
+
+static NSDictionary *handleDeleteChat(NSInteger requestId, NSDictionary *params) {
+    NSString *chatGuid = params[@"chatGuid"];
+    if (!chatGuid.length) return errorResponse(requestId, @"Missing chatGuid");
+    IMChat *chat = resolveChatByGuid(chatGuid);
+    if (!chat) return errorResponse(requestId, @"Chat not found");
+    Class regClass = NSClassFromString(@"IMChatRegistry");
+    id reg = regClass ? [regClass performSelector:@selector(sharedInstance)] : nil;
+    SEL sel = @selector(deleteChat:);
+    if (!reg || ![reg respondsToSelector:sel]) {
+        return errorResponse(requestId, @"deleteChat: not available");
+    }
+    @try {
+        [reg performSelector:sel withObject:chat];
+    } @catch (NSException *ex) { return errorResponse(requestId, ex.reason ?: @"failed"); }
+    return successResponse(requestId, @{@"chatGuid": chatGuid, @"deleted": @YES});
+}
+
+/// `create-chat`: vend handles for each address, ask the registry for a chat
+/// instance, optionally set the display name, optionally send an initial
+/// message. Returns the new chat's guid.
+static NSDictionary *handleCreateChat(NSInteger requestId, NSDictionary *params) {
+    NSArray *addresses = params[@"addresses"];
+    NSString *initialMessage = params[@"message"];
+    NSString *displayName = params[@"displayName"] ?: params[@"name"];
+    NSString *service = params[@"service"] ?: @"iMessage";
+
+    if (![addresses isKindOfClass:[NSArray class]] || addresses.count == 0) {
+        return errorResponse(requestId, @"Missing addresses array");
+    }
+
+    Class hrClass = NSClassFromString(@"IMHandleRegistrar");
+    id hr = hrClass ? [hrClass performSelector:@selector(sharedInstance)] : nil;
+    if (!hr) return errorResponse(requestId, @"IMHandleRegistrar unavailable");
+
+    NSMutableArray *handles = [NSMutableArray array];
+    for (NSString *addr in addresses) {
+        if (![addr isKindOfClass:[NSString class]]) continue;
+        id h = [hr performSelector:@selector(IMHandleWithID:) withObject:addr];
+        if (h) [handles addObject:h];
+    }
+    if (handles.count == 0) {
+        return errorResponse(requestId, @"Could not vend handles for any address");
+    }
+
+    Class regClass = NSClassFromString(@"IMChatRegistry");
+    id reg = regClass ? [regClass performSelector:@selector(sharedInstance)] : nil;
+    id chat = nil;
+    if (handles.count == 1 && [reg respondsToSelector:@selector(chatForIMHandle:)]) {
+        chat = [reg performSelector:@selector(chatForIMHandle:) withObject:handles.firstObject];
+    } else if ([reg respondsToSelector:@selector(chatForIMHandles:)]) {
+        chat = [reg performSelector:@selector(chatForIMHandles:) withObject:handles];
+    }
+    if (!chat) return errorResponse(requestId, @"Registry could not produce chat");
+
+    if (displayName.length && [chat respondsToSelector:@selector(setDisplayName:)]) {
+        @try { [chat performSelector:@selector(setDisplayName:) withObject:displayName]; }
+        @catch (__unused NSException *ex) {}
+    }
+
+    NSString *messageGuid = nil;
+    if (initialMessage.length) {
+        NSAttributedString *body = buildPlainAttributed(initialMessage, 0);
+        @try {
+            id imMessage = buildIMMessage(body, nil, nil, nil, nil, 0,
+                                          NSMakeRange(0, body.length),
+                                          nil, @[], NO, NO);
+            if (imMessage) {
+                [chat performSelector:@selector(sendMessage:) withObject:imMessage];
+                messageGuid = lastSentMessageGuid(chat);
+            }
+        } @catch (__unused NSException *ex) {}
+    }
+
+    NSString *guid = [chat respondsToSelector:@selector(guid)]
+        ? [chat performSelector:@selector(guid)] : @"";
+    return successResponse(requestId, @{
+        @"chatGuid": guid ?: @"",
+        @"service": service,
+        @"messageGuid": messageGuid ?: @"",
+        @"participants": addresses
+    });
+}
+
+#pragma mark - Introspection Handlers (v2)
+
+static NSDictionary *handleSearchMessages(NSInteger requestId, NSDictionary *params) {
+    NSString *query = params[@"query"];
+    if (![query isKindOfClass:[NSString class]] || query.length == 0) {
+        return errorResponse(requestId, @"Missing query");
+    }
+    // Spotlight-style search across loaded chat items via IMChatHistoryController
+    // is not exposed to us cleanly without private headers; return a structured
+    // not-implemented response so the CLI can degrade gracefully.
+    return successResponse(requestId, @{
+        @"query": query,
+        @"results": @[],
+        @"note": @"server-side search not yet implemented; falls back to chat.db"
+    });
+}
+
+static NSDictionary *handleGetAccountInfo(NSInteger requestId, NSDictionary *params) {
+    Class accClass = NSClassFromString(@"IMAccountController");
+    if (!accClass) return errorResponse(requestId, @"IMAccountController unavailable");
+    id ctrl = [accClass performSelector:@selector(sharedInstance)];
+    if (!ctrl) return errorResponse(requestId, @"controller nil");
+
+    NSMutableDictionary *info = [NSMutableDictionary dictionary];
+    if ([ctrl respondsToSelector:@selector(activeIMessageAccount)]) {
+        id account = [ctrl performSelector:@selector(activeIMessageAccount)];
+        if (account) {
+            NSArray *aliases = nil;
+            if ([account respondsToSelector:@selector(vettedAliases)]) {
+                aliases = [account performSelector:@selector(vettedAliases)];
+            }
+            id login = nil;
+            if ([account respondsToSelector:@selector(loginIMHandle)]) {
+                login = [account performSelector:@selector(loginIMHandle)];
+            }
+            NSString *loginID = nil;
+            if (login && [login respondsToSelector:@selector(ID)]) {
+                loginID = [login performSelector:@selector(ID)];
+            }
+            info[@"vetted_aliases"] = aliases ?: @[];
+            info[@"login"] = loginID ?: @"";
+            info[@"service"] = @"iMessage";
+        }
+    }
+    return successResponse(requestId, info);
+}
+
+static NSDictionary *handleGetNicknameInfo(NSInteger requestId, NSDictionary *params) {
+    NSString *address = params[@"address"];
+    Class nnClass = NSClassFromString(@"IMNicknameController");
+    if (!nnClass) return errorResponse(requestId, @"IMNicknameController unavailable");
+    id ctrl = [nnClass performSelector:@selector(sharedController)];
+    if (!ctrl) return errorResponse(requestId, @"controller nil");
+
+    NSMutableDictionary *info = [NSMutableDictionary dictionary];
+    if (address.length && [ctrl respondsToSelector:@selector(nicknameForHandle:)]) {
+        id nickname = [ctrl performSelector:@selector(nicknameForHandle:) withObject:address];
+        info[@"address"] = address;
+        info[@"has_nickname"] = @(nickname != nil);
+        if (nickname) {
+            info[@"description"] = [nickname description] ?: @"";
+        }
+    }
+    return successResponse(requestId, info);
+}
+
+static NSDictionary *handleCheckIMessageAvailability(NSInteger requestId, NSDictionary *params) {
+    NSString *address = params[@"address"];
+    NSString *aliasType = params[@"aliasType"] ?: @"phone";
+    if (!address.length) return errorResponse(requestId, @"Missing address");
+    Class q = NSClassFromString(@"IDSIDQueryController");
+    if (!q) return errorResponse(requestId, @"IDSIDQueryController unavailable");
+    id ctrl = [q performSelector:@selector(sharedController)];
+    if (!ctrl) return errorResponse(requestId, @"controller nil");
+
+    NSString *destination = address;
+    if ([aliasType isEqualToString:@"phone"]) {
+        if (![destination hasPrefix:@"tel:"]) destination = [@"tel:" stringByAppendingString:destination];
+    } else if ([aliasType isEqualToString:@"email"]) {
+        if (![destination hasPrefix:@"mailto:"]) destination = [@"mailto:" stringByAppendingString:destination];
+    }
+
+    NSInteger status = 0;
+    @try {
+        SEL sel = @selector(currentIDStatusForDestination:service:);
+        if ([ctrl respondsToSelector:sel]) {
+            id result = [ctrl performSelector:sel withObject:destination withObject:nil];
+            if ([result isKindOfClass:[NSNumber class]]) {
+                status = [(NSNumber *)result integerValue];
+            }
+        }
+    } @catch (__unused NSException *ex) {}
+
+    return successResponse(requestId, @{
+        @"address": address,
+        @"alias_type": aliasType,
+        @"destination": destination,
+        @"id_status": @(status),
+        @"available": @(status == 1)
+    });
+}
+
+static NSDictionary *handleDownloadPurgedAttachment(NSInteger requestId, NSDictionary *params) {
+    NSString *attachmentGuid = params[@"attachmentGuid"];
+    if (!attachmentGuid.length) return errorResponse(requestId, @"Missing attachmentGuid");
+    Class ftcClass = NSClassFromString(@"IMFileTransferCenter");
+    id ftc = ftcClass ? [ftcClass performSelector:@selector(sharedInstance)] : nil;
+    if (!ftc) return errorResponse(requestId, @"FileTransferCenter unavailable");
+
+    SEL sel = @selector(acceptTransfer:);
+    if (![ftc respondsToSelector:sel]) {
+        return errorResponse(requestId, @"acceptTransfer: not available");
+    }
+    @try {
+        [ftc performSelector:sel withObject:attachmentGuid];
+    } @catch (NSException *ex) { return errorResponse(requestId, ex.reason ?: @"failed"); }
+    return successResponse(requestId, @{@"attachmentGuid": attachmentGuid, @"queued": @YES});
+}
+
 #pragma mark - Command Router
+
+/// Dispatch an action by name, returning a legacy-envelope NSDictionary. Used
+/// by both the v1 single-file IPC path and (after key-stripping) the v2 path.
+static NSDictionary* dispatchAction(NSInteger legacyId, NSString *action,
+                                    NSDictionary *params) {
+    if ([action isEqualToString:@"typing"]) {
+        return handleTyping(legacyId, params);
+    } else if ([action isEqualToString:@"read"]) {
+        return handleRead(legacyId, params);
+    } else if ([action isEqualToString:@"status"] ||
+               [action isEqualToString:@"bridge-status"]) {
+        return handleStatus(legacyId, params);
+    } else if ([action isEqualToString:@"list_chats"]) {
+        return handleListChats(legacyId, params);
+    } else if ([action isEqualToString:@"ping"]) {
+        return successResponse(legacyId, @{@"pong": @YES});
+    }
+    // v2 actions
+    if ([action isEqualToString:@"send-message"]) return handleSendMessage(legacyId, params);
+    if ([action isEqualToString:@"send-multipart"]) return handleSendMultipart(legacyId, params);
+    if ([action isEqualToString:@"send-attachment"]) return handleSendAttachment(legacyId, params);
+    if ([action isEqualToString:@"send-reaction"]) return handleSendReaction(legacyId, params);
+    if ([action isEqualToString:@"notify-anyways"]) return handleNotifyAnyways(legacyId, params);
+    if ([action isEqualToString:@"edit-message"]) return handleEditMessage(legacyId, params);
+    if ([action isEqualToString:@"unsend-message"]) return handleUnsendMessage(legacyId, params);
+    if ([action isEqualToString:@"delete-message"]) return handleDeleteMessage(legacyId, params);
+    if ([action isEqualToString:@"start-typing"]) return handleStartTyping(legacyId, params);
+    if ([action isEqualToString:@"stop-typing"]) return handleStopTyping(legacyId, params);
+    if ([action isEqualToString:@"check-typing-status"]) return handleCheckTypingStatus(legacyId, params);
+    if ([action isEqualToString:@"mark-chat-read"]) return handleMarkChatRead(legacyId, params);
+    if ([action isEqualToString:@"mark-chat-unread"]) return handleMarkChatUnread(legacyId, params);
+    if ([action isEqualToString:@"add-participant"]) return handleAddParticipant(legacyId, params);
+    if ([action isEqualToString:@"remove-participant"]) return handleRemoveParticipant(legacyId, params);
+    if ([action isEqualToString:@"set-display-name"]) return handleSetDisplayName(legacyId, params);
+    if ([action isEqualToString:@"update-group-photo"]) return handleUpdateGroupPhoto(legacyId, params);
+    if ([action isEqualToString:@"leave-chat"]) return handleLeaveChat(legacyId, params);
+    if ([action isEqualToString:@"delete-chat"]) return handleDeleteChat(legacyId, params);
+    if ([action isEqualToString:@"create-chat"]) return handleCreateChat(legacyId, params);
+    if ([action isEqualToString:@"search-messages"]) return handleSearchMessages(legacyId, params);
+    if ([action isEqualToString:@"get-account-info"]) return handleGetAccountInfo(legacyId, params);
+    if ([action isEqualToString:@"get-nickname-info"]) return handleGetNicknameInfo(legacyId, params);
+    if ([action isEqualToString:@"check-imessage-availability"])
+        return handleCheckIMessageAvailability(legacyId, params);
+    if ([action isEqualToString:@"download-purged-attachment"])
+        return handleDownloadPurgedAttachment(legacyId, params);
+    return errorResponse(legacyId,
+        [NSString stringWithFormat:@"Unknown action: %@", action]);
+}
 
 static NSDictionary* processCommand(NSDictionary *command) {
     NSNumber *requestIdNum = command[@"id"];
@@ -408,21 +1834,39 @@ static NSDictionary* processCommand(NSDictionary *command) {
     NSDictionary *params = command[@"params"] ?: @{};
 
     NSLog(@"[imsg-bridge] Processing command: %@ (id=%ld)", action, (long)requestId);
+    return dispatchAction(requestId, action, params);
+}
 
-    if ([action isEqualToString:@"typing"]) {
-        return handleTyping(requestId, params);
-    } else if ([action isEqualToString:@"read"]) {
-        return handleRead(requestId, params);
-    } else if ([action isEqualToString:@"status"]) {
-        return handleStatus(requestId, params);
-    } else if ([action isEqualToString:@"list_chats"]) {
-        return handleListChats(requestId, params);
-    } else if ([action isEqualToString:@"ping"]) {
-        return successResponse(requestId, @{@"pong": @YES});
-    } else {
-        return errorResponse(requestId,
-            [NSString stringWithFormat:@"Unknown action: %@", action]);
+/// Process a v2 envelope: re-route to the shared dispatcher, then strip the
+/// legacy envelope keys and re-wrap with the v2 shape.
+static NSDictionary* processV2Envelope(NSDictionary *envelope) {
+    NSString *uuid = envelope[@"id"];
+    if (![uuid isKindOfClass:[NSString class]]) uuid = @"";
+    NSString *action = envelope[@"action"];
+    NSDictionary *params = envelope[@"params"] ?: @{};
+    if (![action isKindOfClass:[NSString class]] || action.length == 0) {
+        return errorResponseV2(uuid, @"Missing action");
     }
+
+    NSLog(@"[imsg-bridge v2] action=%@ id=%@", action, uuid);
+
+    NSDictionary *legacy = dispatchAction(0, action, params);
+    if (![legacy isKindOfClass:[NSDictionary class]]) {
+        return errorResponseV2(uuid, @"Internal: handler returned non-dictionary");
+    }
+
+    BOOL ok = [legacy[@"success"] boolValue];
+    if (!ok) {
+        NSString *errMsg = legacy[@"error"];
+        return errorResponseV2(uuid, errMsg ?: @"Unknown error");
+    }
+
+    NSMutableDictionary *data = [NSMutableDictionary dictionaryWithDictionary:legacy];
+    [data removeObjectForKey:@"id"];
+    [data removeObjectForKey:@"success"];
+    [data removeObjectForKey:@"error"];
+    [data removeObjectForKey:@"timestamp"];
+    return successResponseV2(uuid, data);
 }
 
 #pragma mark - File-based IPC
@@ -508,6 +1952,158 @@ static void startFileWatcher(void) {
     NSLog(@"[imsg-bridge] File watcher started, ready for commands");
 }
 
+#pragma mark - Inbound Event Observers
+
+/// Register NSNotificationCenter observers that translate IMCore notifications
+/// into JSON-lines events on `.imsg-events.jsonl`. These power
+/// `imsg watch --bb-events` for live typing/alias-removal indicators.
+static void registerEventObservers(void) {
+    NSNotificationCenter *nc = [NSNotificationCenter defaultCenter];
+
+    // IMChatItemsDidChange: fires whenever a chat's item list shifts. We
+    // inspect the userInfo to spot inserted IMTypingChatItem instances and
+    // emit started-typing / stopped-typing events.
+    [nc addObserverForName:@"IMChatItemsDidChangeNotification"
+                    object:nil
+                     queue:nil
+                usingBlock:^(NSNotification *note) {
+        @autoreleasepool {
+            id chat = note.object;
+            NSString *chatGuid = nil;
+            if (chat && [chat respondsToSelector:@selector(guid)]) {
+                chatGuid = [chat performSelector:@selector(guid)];
+            }
+            NSDictionary *userInfo = note.userInfo;
+            NSArray *inserted = userInfo[@"__kIMChatValueKey"]
+                              ?: userInfo[@"inserted"];
+            if (![inserted isKindOfClass:[NSArray class]]) return;
+            for (id item in inserted) {
+                NSString *cls = NSStringFromClass([item class]);
+                if ([cls containsString:@"TypingChatItem"]) {
+                    BOOL isCancel = NO;
+                    if ([item respondsToSelector:@selector(isCancelTypingMessage)]) {
+                        isCancel = ((BOOL (*)(id, SEL))objc_msgSend)(item,
+                            @selector(isCancelTypingMessage));
+                    }
+                    appendEvent(@{
+                        @"event": isCancel ? @"stopped-typing" : @"started-typing",
+                        @"data": @{ @"chatGuid": chatGuid ?: @"" }
+                    });
+                }
+            }
+        }
+    }];
+
+    // Account aliases removed (e.g., user removed an iMessage email).
+    [nc addObserverForName:@"__kIMAccountAliasesRemovedNotification"
+                    object:nil
+                     queue:nil
+                usingBlock:^(NSNotification *note) {
+        appendEvent(@{
+            @"event": @"aliases-removed",
+            @"data": note.userInfo ?: @{}
+        });
+    }];
+
+    NSLog(@"[imsg-bridge] Event observers registered");
+}
+
+#pragma mark - v2 Inbox Watcher
+
+/// Process a single inbox file end-to-end: read, dispatch, write outbox,
+/// remove inbox. Skips re-processed ids via processedRpcIds.
+static void processV2InboxFile(NSString *uuid) {
+    @autoreleasepool {
+        if ([processedRpcIds containsObject:uuid]) {
+            return;
+        }
+        [processedRpcIds addObject:uuid];
+
+        NSString *inPath = [kRpcInDir stringByAppendingPathComponent:
+            [uuid stringByAppendingPathExtension:@"json"]];
+        NSString *outPath = [kRpcOutDir stringByAppendingPathComponent:
+            [uuid stringByAppendingPathExtension:@"json"]];
+
+        NSError *err = nil;
+        NSData *body = [NSData dataWithContentsOfFile:inPath options:0 error:&err];
+        if (!body || err) {
+            NSLog(@"[imsg-bridge v2] Could not read %@: %@", inPath, err);
+            // Remove malformed file so we don't retry forever.
+            [[NSFileManager defaultManager] removeItemAtPath:inPath error:nil];
+            return;
+        }
+
+        NSDictionary *envelope = [NSJSONSerialization JSONObjectWithData:body
+                                                                 options:0
+                                                                   error:&err];
+        NSDictionary *response;
+        if (!envelope || ![envelope isKindOfClass:[NSDictionary class]]) {
+            response = errorResponseV2(uuid, @"Invalid JSON in request");
+        } else {
+            response = processV2Envelope(envelope);
+        }
+
+        NSData *responseData = [NSJSONSerialization dataWithJSONObject:response
+                                                               options:0
+                                                                 error:&err];
+        if (responseData) {
+            NSString *tmp = [outPath stringByAppendingPathExtension:@"tmp"];
+            [responseData writeToFile:tmp atomically:NO];
+            // Atomic rename so the CLI never reads a half-written file.
+            rename(tmp.UTF8String, outPath.UTF8String);
+        }
+
+        // Drop the inbox request — we're done with it.
+        [[NSFileManager defaultManager] removeItemAtPath:inPath error:nil];
+
+        // Cap the dedupe set to prevent unbounded growth on long-lived dylibs.
+        if (processedRpcIds.count > 1024) {
+            [processedRpcIds removeAllObjects];
+        }
+    }
+}
+
+static void scanV2Inbox(void) {
+    @autoreleasepool {
+        NSError *err = nil;
+        NSArray *entries = [[NSFileManager defaultManager]
+            contentsOfDirectoryAtPath:kRpcInDir error:&err];
+        if (!entries) return;
+        for (NSString *name in entries) {
+            // Only consume finalized .json files; skip in-flight .tmp.
+            if (![name hasSuffix:@".json"]) continue;
+            NSString *uuid = [name stringByDeletingPathExtension];
+            processV2InboxFile(uuid);
+        }
+    }
+}
+
+static void startV2InboxWatcher(void) {
+    initFilePaths();
+
+    // Ensure the queue dirs exist (CLI also pre-creates them, but be defensive
+    // in case a v2-only run happened).
+    [[NSFileManager defaultManager] createDirectoryAtPath:kRpcInDir
+                              withIntermediateDirectories:YES
+                                               attributes:nil
+                                                    error:nil];
+    [[NSFileManager defaultManager] createDirectoryAtPath:kRpcOutDir
+                              withIntermediateDirectories:YES
+                                               attributes:nil
+                                                    error:nil];
+
+    NSLog(@"[imsg-bridge v2] Inbox: %@", kRpcInDir);
+    NSLog(@"[imsg-bridge v2] Outbox: %@", kRpcOutDir);
+
+    NSTimer *timer = [NSTimer timerWithTimeInterval:0.1 repeats:YES block:^(NSTimer *t) {
+        scanV2Inbox();
+    }];
+    [[NSRunLoop mainRunLoop] addTimer:timer forMode:NSRunLoopCommonModes];
+    rpcInboxTimer = timer;
+
+    NSLog(@"[imsg-bridge v2] Inbox watcher started");
+}
+
 #pragma mark - Dylib Entry Point
 
 __attribute__((constructor))
@@ -545,7 +2141,10 @@ static void injectedInit(void) {
             NSLog(@"[imsg-bridge] IMChatRegistry NOT available");
         }
 
+        probeSelectors();
         startFileWatcher();
+        startV2InboxWatcher();
+        registerEventObservers();
     });
 }
 
@@ -556,6 +2155,10 @@ static void injectedCleanup(void) {
     if (fileWatchTimer) {
         [fileWatchTimer invalidate];
         fileWatchTimer = nil;
+    }
+    if (rpcInboxTimer) {
+        [rpcInboxTimer invalidate];
+        rpcInboxTimer = nil;
     }
 
     if (lockFd >= 0) {
