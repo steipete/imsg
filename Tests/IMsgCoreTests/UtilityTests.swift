@@ -157,6 +157,44 @@ func typedStreamParserTrimsControlCharacters() {
 }
 
 @Test
+func typedStreamParserDecodesShortSingleBytePrefix() {
+  let text = "hello"
+  let bytes: [UInt8] =
+    [0x01, 0x2b, UInt8(text.utf8.count)] + Array(text.utf8) + [0x86, 0x84]
+  #expect(TypedStreamParser.parseAttributedBody(Data(bytes)) == text)
+}
+
+@Test
+func typedStreamParserDecodesMediumMessageWith0x81Prefix() {
+  let text = String(repeating: "A", count: 140)
+  let length = UInt8(text.utf8.count)
+  let bytes: [UInt8] =
+    [0x01, 0x2b, 0x81, length] + Array(text.utf8) + [0x86, 0x84]
+  #expect(TypedStreamParser.parseAttributedBody(Data(bytes)) == text)
+}
+
+@Test
+func typedStreamParserDecodesLongMessageWith0x82Prefix() {
+  let text = String(repeating: "B", count: 300)
+  let length = UInt16(text.utf8.count)
+  let lengthHi = UInt8((length >> 8) & 0xff)
+  let lengthLo = UInt8(length & 0xff)
+  let bytes: [UInt8] =
+    [0x01, 0x2b, 0x82, lengthHi, lengthLo] + Array(text.utf8) + [0x86, 0x84]
+  #expect(TypedStreamParser.parseAttributedBody(Data(bytes)) == text)
+}
+
+@Test
+func typedStreamParserHandlesMixedBinaryNoise() {
+  // First byte 0x42 is neither 0x81 nor 0x82, and does not equal segment.count - 1 (= 6).
+  // The decoder should fall back to no-prefix decoding without crashing.
+  let bytes: [UInt8] =
+    [0x01, 0x2b, 0x42, 0x68, 0x69, 0x21, 0x86, 0x84]
+  let result = TypedStreamParser.parseAttributedBody(Data(bytes))
+  #expect(result == "Bhi!")
+}
+
+@Test
 func typedStreamParserDecodesUTF16LittleEndianBOM() throws {
   var data = Data([0xff, 0xfe])
   let body = "hello 🌤️"
