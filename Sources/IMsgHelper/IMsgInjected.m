@@ -31,6 +31,12 @@ static NSString *kRpcOutDir = nil;    // .imsg-rpc/out/
 static NSString *kEventsFile = nil;   // .imsg-events.jsonl
 static NSString *kEventsRotated = nil;// .imsg-events.jsonl.1
 
+// Diagnostic file logger. Unified logging redacts NSLog output from inside
+// system app processes on macOS 26, which makes diagnosing handler behavior
+// from outside the dylib painful. Append-only file in the sandbox container
+// gives us a stable channel that's readable from outside.
+static NSString *kDebugLogFile = nil; // .imsg-bridge.log
+
 static NSTimer *fileWatchTimer = nil;
 static NSTimer *rpcInboxTimer = nil;
 static NSMutableSet *processedRpcIds = nil;
@@ -52,10 +58,31 @@ static void initFilePaths(void) {
         kRpcOutDir = [kRpcDir stringByAppendingPathComponent:@"out"];
         kEventsFile = [containerPath stringByAppendingPathComponent:@".imsg-events.jsonl"];
         kEventsRotated = [containerPath stringByAppendingPathComponent:@".imsg-events.jsonl.1"];
+        kDebugLogFile = [containerPath stringByAppendingPathComponent:@".imsg-bridge.log"];
     }
     if (processedRpcIds == nil) {
         processedRpcIds = [NSMutableSet set];
     }
+}
+
+/// Append a line to `.imsg-bridge.log` inside the Messages container. NSLog
+/// output is redacted by unified logging when emitted from system apps on
+/// macOS 26, so this is the only reliable diagnostic channel for behavior
+/// inside the injected dylib.
+__attribute__((format(NSString, 1, 2)))
+static void debugLog(NSString *fmt, ...) {
+    if (!kDebugLogFile) return;
+    va_list args;
+    va_start(args, fmt);
+    NSString *msg = [[NSString alloc] initWithFormat:fmt arguments:args];
+    va_end(args);
+    static NSISO8601DateFormatter *fmtr;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ fmtr = [NSISO8601DateFormatter new]; });
+    NSString *line = [NSString stringWithFormat:@"%@ %@\n",
+                      [fmtr stringFromDate:[NSDate date]], msg];
+    FILE *fp = fopen(kDebugLogFile.UTF8String, "a");
+    if (fp) { fputs(line.UTF8String, fp); fclose(fp); }
 }
 
 #pragma mark - Selector Probes
@@ -374,6 +401,7 @@ static id findChat(NSString *identifier) {
 static NSDictionary* handleTyping(NSInteger requestId, NSDictionary *params) {
     NSString *handle = params[@"handle"];
     NSNumber *state = params[@"typing"] ?: params[@"state"];
+    debugLog(@"handleTyping: enter handle=%@ state=%@ params=%@", handle, state, params);
 
     if (!handle) {
         return errorResponse(requestId, @"Missing required parameter: handle");
@@ -383,6 +411,7 @@ static NSDictionary* handleTyping(NSInteger requestId, NSDictionary *params) {
     id chat = findChat(handle);
 
     if (!chat) {
+        debugLog(@"handleTyping: chat not found for %@", handle);
         return errorResponse(requestId,
             [NSString stringWithFormat:@"Chat not found: %@", handle]);
     }
@@ -406,6 +435,33 @@ static NSDictionary* handleTyping(NSInteger requestId, NSDictionary *params) {
             supportsTyping = ((BOOL (*)(id, SEL))objc_msgSend)(chat, supportsSel);
         }
 
+        BOOL isCurrentlyTyping = NO;
+        if ([chat respondsToSelector:@selector(isCurrentlyTyping)]) {
+            isCurrentlyTyping = ((BOOL (*)(id, SEL))objc_msgSend)(chat, @selector(isCurrentlyTyping));
+        }
+
+        id account = nil;
+        NSString *acctService = @"nil";
+        BOOL acctActive = NO;
+        BOOL acctLoggedIn = NO;
+        if ([chat respondsToSelector:@selector(account)]) {
+            account = [chat performSelector:@selector(account)];
+            if ([account respondsToSelector:@selector(serviceName)]) {
+                acctService = [account performSelector:@selector(serviceName)] ?: @"nil";
+            }
+            if ([account respondsToSelector:@selector(isActive)]) {
+                acctActive = ((BOOL (*)(id, SEL))objc_msgSend)(account, @selector(isActive));
+            }
+            if ([account respondsToSelector:@selector(loggedIn)]) {
+                acctLoggedIn = ((BOOL (*)(id, SEL))objc_msgSend)(account, @selector(loggedIn));
+            }
+        }
+
+        debugLog(@"handleTyping: chat class=%@ guid=%@ ident=%@ supportsTyping=%d alreadyTyping=%d "
+                 @"acctService=%@ acctActive=%d acctLoggedIn=%d target=%d",
+                 chatClass, chatGUID, chatIdent, supportsTyping, isCurrentlyTyping,
+                 acctService, acctActive, acctLoggedIn, typing);
+
         NSLog(@"[imsg-bridge] Chat found: class=%@, guid=%@, identifier=%@, supportsTyping=%@",
               chatClass, chatGUID, chatIdent, supportsTyping ? @"YES" : @"NO");
 
@@ -422,6 +478,13 @@ static NSDictionary* handleTyping(NSInteger requestId, NSDictionary *params) {
             [inv setArgument:&typing atIndex:2];
             [inv invoke];
 
+            BOOL afterTyping = NO;
+            if ([chat respondsToSelector:@selector(isCurrentlyTyping)]) {
+                afterTyping = ((BOOL (*)(id, SEL))objc_msgSend)(chat, @selector(isCurrentlyTyping));
+            }
+            debugLog(@"handleTyping: setLocalUserIsTyping:%d returned, isCurrentlyTyping after=%d",
+                     typing, afterTyping);
+
             NSLog(@"[imsg-bridge] Called setLocalUserIsTyping:%@ for %@",
                   typing ? @"YES" : @"NO", handle);
             return successResponse(requestId, @{
@@ -430,8 +493,10 @@ static NSDictionary* handleTyping(NSInteger requestId, NSDictionary *params) {
             });
         }
 
+        debugLog(@"handleTyping: setLocalUserIsTyping: not available on chat class=%@", chatClass);
         return errorResponse(requestId, @"setLocalUserIsTyping: method not available");
     } @catch (NSException *exception) {
+        debugLog(@"handleTyping: exception=%@", exception.reason);
         return errorResponse(requestId,
             [NSString stringWithFormat:@"Failed to set typing: %@", exception.reason]);
     }
@@ -439,6 +504,7 @@ static NSDictionary* handleTyping(NSInteger requestId, NSDictionary *params) {
 
 static NSDictionary* handleRead(NSInteger requestId, NSDictionary *params) {
     NSString *handle = params[@"handle"];
+    debugLog(@"handleRead: enter handle=%@ params=%@", handle, params);
 
     if (!handle) {
         return errorResponse(requestId, @"Missing required parameter: handle");
@@ -447,14 +513,38 @@ static NSDictionary* handleRead(NSInteger requestId, NSDictionary *params) {
     id chat = findChat(handle);
 
     if (!chat) {
+        debugLog(@"handleRead: chat not found for %@", handle);
         return errorResponse(requestId,
             [NSString stringWithFormat:@"Chat not found: %@", handle]);
     }
 
+    NSString *chatClass = NSStringFromClass([chat class]);
+    NSUInteger unreadBefore = 0;
+    BOOL hadUnread = NO;
+    if ([chat respondsToSelector:@selector(unreadMessageCount)]) {
+        unreadBefore = ((NSUInteger (*)(id, SEL))objc_msgSend)(chat, @selector(unreadMessageCount));
+    }
+    if ([chat respondsToSelector:@selector(hasUnreadMessages)]) {
+        hadUnread = ((BOOL (*)(id, SEL))objc_msgSend)(chat, @selector(hasUnreadMessages));
+    }
+
     @try {
         SEL readSel = @selector(markAllMessagesAsRead);
+        debugLog(@"handleRead: chat class=%@ unreadBefore=%lu hasUnread=%d responds=%d",
+                 chatClass, (unsigned long)unreadBefore, hadUnread,
+                 [chat respondsToSelector:readSel]);
         if ([chat respondsToSelector:readSel]) {
             [chat performSelector:readSel];
+            NSUInteger unreadAfter = 0;
+            BOOL hasUnreadAfter = NO;
+            if ([chat respondsToSelector:@selector(unreadMessageCount)]) {
+                unreadAfter = ((NSUInteger (*)(id, SEL))objc_msgSend)(chat, @selector(unreadMessageCount));
+            }
+            if ([chat respondsToSelector:@selector(hasUnreadMessages)]) {
+                hasUnreadAfter = ((BOOL (*)(id, SEL))objc_msgSend)(chat, @selector(hasUnreadMessages));
+            }
+            debugLog(@"handleRead: markAllMessagesAsRead returned, unreadAfter=%lu hasUnreadAfter=%d",
+                     (unsigned long)unreadAfter, hasUnreadAfter);
             NSLog(@"[imsg-bridge] Marked all messages as read for %@", handle);
             return successResponse(requestId, @{
                 @"handle": handle,
@@ -464,6 +554,7 @@ static NSDictionary* handleRead(NSInteger requestId, NSDictionary *params) {
             return errorResponse(requestId, @"markAllMessagesAsRead method not available");
         }
     } @catch (NSException *exception) {
+        debugLog(@"handleRead: exception=%@", exception.reason);
         return errorResponse(requestId,
             [NSString stringWithFormat:@"Failed to mark as read: %@", exception.reason]);
     }
@@ -1466,21 +1557,41 @@ static NSDictionary *handleDeleteMessage(NSInteger requestId, NSDictionary *para
 
 static NSDictionary *handleStartTyping(NSInteger requestId, NSDictionary *params) {
     NSString *chatGuid = params[@"chatGuid"];
+    debugLog(@"handleStartTyping: chatGuid=%@", chatGuid);
     if (!chatGuid.length) return errorResponse(requestId, @"Missing chatGuid");
     IMChat *chat = resolveChatByGuid(chatGuid);
-    if (!chat) return errorResponse(requestId, @"Chat not found");
+    if (!chat) {
+        debugLog(@"handleStartTyping: chat not found");
+        return errorResponse(requestId, @"Chat not found");
+    }
+    BOOL beforeT = NO, afterT = NO;
+    if ([chat respondsToSelector:@selector(isCurrentlyTyping)]) {
+        beforeT = ((BOOL (*)(id, SEL))objc_msgSend)(chat, @selector(isCurrentlyTyping));
+    }
     @try { [chat setLocalUserIsTyping:YES]; }
-    @catch (NSException *ex) { return errorResponse(requestId, ex.reason ?: @"failed"); }
+    @catch (NSException *ex) {
+        debugLog(@"handleStartTyping: exception=%@", ex.reason);
+        return errorResponse(requestId, ex.reason ?: @"failed");
+    }
+    if ([chat respondsToSelector:@selector(isCurrentlyTyping)]) {
+        afterT = ((BOOL (*)(id, SEL))objc_msgSend)(chat, @selector(isCurrentlyTyping));
+    }
+    debugLog(@"handleStartTyping: setLocalUserIsTyping:YES beforeIsTyping=%d afterIsTyping=%d "
+             @"chatClass=%@", beforeT, afterT, NSStringFromClass([chat class]));
     return successResponse(requestId, @{@"chatGuid": chatGuid, @"typing": @YES});
 }
 
 static NSDictionary *handleStopTyping(NSInteger requestId, NSDictionary *params) {
     NSString *chatGuid = params[@"chatGuid"];
+    debugLog(@"handleStopTyping: chatGuid=%@", chatGuid);
     if (!chatGuid.length) return errorResponse(requestId, @"Missing chatGuid");
     IMChat *chat = resolveChatByGuid(chatGuid);
     if (!chat) return errorResponse(requestId, @"Chat not found");
     @try { [chat setLocalUserIsTyping:NO]; }
-    @catch (NSException *ex) { return errorResponse(requestId, ex.reason ?: @"failed"); }
+    @catch (NSException *ex) {
+        debugLog(@"handleStopTyping: exception=%@", ex.reason);
+        return errorResponse(requestId, ex.reason ?: @"failed");
+    }
     return successResponse(requestId, @{@"chatGuid": chatGuid, @"typing": @NO});
 }
 
