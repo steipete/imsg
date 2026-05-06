@@ -22,12 +22,20 @@ protocol RPCOutput: Sendable {
 /// Keep in sync with the dispatch switch in `RPCServer.handleLine`.
 let kSupportedRPCMethods: [String] = [
   "chats.list",
+  "chats.create",
+  "chats.delete",
+  "chats.markUnread",
   "messages.history",
   "watch.subscribe",
   "watch.unsubscribe",
   "send",
   "typing",
   "read",
+  "group.rename",
+  "group.setIcon",
+  "group.addParticipant",
+  "group.removeParticipant",
+  "group.leave",
 ]
 
 final class RPCServer {
@@ -121,6 +129,22 @@ final class RPCServer {
         try await handleTyping(params: params, id: id)
       case "read":
         try await handleRead(params: params, id: id)
+      case "chats.create":
+        try await handleChatsCreate(id: id, params: params)
+      case "chats.delete":
+        try await handleChatsDelete(id: id, params: params)
+      case "chats.markUnread":
+        try await handleChatsMarkUnread(id: id, params: params)
+      case "group.rename":
+        try await handleGroupRename(id: id, params: params)
+      case "group.setIcon":
+        try await handleGroupSetIcon(id: id, params: params)
+      case "group.addParticipant":
+        try await handleGroupAddParticipant(id: id, params: params)
+      case "group.removeParticipant":
+        try await handleGroupRemoveParticipant(id: id, params: params)
+      case "group.leave":
+        try await handleGroupLeave(id: id, params: params)
       default:
         output.sendError(id: id, error: RPCError.methodNotFound(method))
       }
