@@ -16,6 +16,25 @@
 #import <unistd.h>
 #import <stdio.h>
 #import <sys/stat.h>
+#import <dlfcn.h>
+
+// IMCore C function. The symbol lives in the dyld shared cache on macOS 26
+// and isn't picked up by the static linker, so resolve dynamically. Given a
+// parent message's first IMMessagePartChatItem, returns the thread
+// identifier string ("0:0:<parent-len>:<parent-guid>") to set on the reply.
+typedef NSString *(*IMCreateThreadIdentifierForMessagePartChatItemFn)(id);
+
+static IMCreateThreadIdentifierForMessagePartChatItemFn
+imCreateThreadIdentifierFn(void) {
+    static IMCreateThreadIdentifierForMessagePartChatItemFn fn = NULL;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        fn = (IMCreateThreadIdentifierForMessagePartChatItemFn)
+            dlsym(RTLD_DEFAULT,
+                  "IMCreateThreadIdentifierForMessagePartChatItem");
+    });
+    return fn;
+}
 
 #pragma mark - Constants
 
@@ -174,6 +193,7 @@ static void probeSelectors(void) {
 - (id)_imMessageItem;
 - (void)_updateText:(NSAttributedString *)attributedText;
 - (void)setThreadIdentifier:(NSString *)threadIdentifier;
+- (void)setThreadOriginator:(id)originator;
 + (id)messageFromIMMessageItem:(id)item sender:(id)sender subject:(id)subject;
 @end
 
@@ -244,6 +264,8 @@ static void probeSelectors(void) {
                     beforeDate:(NSDate *)date
                          limit:(NSUInteger)limit
                   loadIfNeeded:(BOOL)load;
+- (void)loadMessageWithGUID:(NSString *)guid
+            completionBlock:(void (^)(id message))completion;
 @end
 
 @interface IMNicknameController : NSObject
@@ -1017,6 +1039,97 @@ static id constructIMMessageViaItem(NSAttributedString *attributedText,
     return invokeReturningObject(winv);
 }
 
+/// Load the parent message for a reply via IMChatHistoryController and
+/// derive the thread identifier required for proper threaded-reply
+/// rendering on macOS 26 (`0:0:<parent-len>:<parent-guid>`). On earlier
+/// macOS releases setting `associatedMessageGUID` + `associatedMessageType=100`
+/// alone produced a quoted reply; on macOS 26 the receiver also needs the
+/// thread identifier to render the in-line reply UI. Returns nil if the
+/// parent can't be resolved (block-based load timed out, or the IMCore C
+/// helper isn't available); caller should still send without threading
+/// rather than fail the whole reply.
+static NSString *deriveThreadIdentifier(NSString *parentGuid,
+                                         id *outParentMessage) {
+    if (outParentMessage) *outParentMessage = nil;
+    if (parentGuid.length == 0) return nil;
+
+    Class hcClass = NSClassFromString(@"IMChatHistoryController");
+    if (!hcClass) {
+        debugLog(@"deriveThreadIdentifier: IMChatHistoryController class missing");
+        return nil;
+    }
+    id hc = [hcClass performSelector:@selector(sharedInstance)];
+    if (!hc) {
+        debugLog(@"deriveThreadIdentifier: sharedInstance returned nil");
+        return nil;
+    }
+    SEL loadSel = @selector(loadMessageWithGUID:completionBlock:);
+    if (![hc respondsToSelector:loadSel]) {
+        debugLog(@"deriveThreadIdentifier: loadMessageWithGUID:completionBlock: missing");
+        return nil;
+    }
+
+    __block id parent = nil;
+    __block BOOL done = NO;
+    NSMethodSignature *sig = [hc methodSignatureForSelector:loadSel];
+    NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
+    [inv setSelector:loadSel];
+    [inv setTarget:hc];
+    NSString *guid = parentGuid;
+    [inv setArgument:&guid atIndex:2];
+    void (^completion)(id) = ^(id message) {
+        parent = message;
+        done = YES;
+    };
+    [inv setArgument:&completion atIndex:3];
+    [inv retainArguments];
+    [inv invoke];
+
+    // Pump the run loop briefly so the load completion can run inline.
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:3.0];
+    while (!done && [deadline timeIntervalSinceNow] > 0) {
+        [[NSRunLoop currentRunLoop]
+            runMode:NSDefaultRunLoopMode
+            beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
+    }
+    if (!parent) {
+        debugLog(@"deriveThreadIdentifier: parent did not load within 3s for %@",
+                 parentGuid);
+        return nil;
+    }
+    if (outParentMessage) *outParentMessage = parent;
+
+    if (![parent respondsToSelector:@selector(_imMessageItem)]) {
+        debugLog(@"deriveThreadIdentifier: parent has no _imMessageItem");
+        return nil;
+    }
+    id parentItem = [parent performSelector:@selector(_imMessageItem)];
+    SEL chatItemsSel = NSSelectorFromString(@"_newChatItems");
+    if (!parentItem || ![parentItem respondsToSelector:chatItemsSel]) {
+        debugLog(@"deriveThreadIdentifier: parentItem missing _newChatItems");
+        return nil;
+    }
+
+    id items = [parentItem performSelector:chatItemsSel];
+    id chatItem = [items isKindOfClass:[NSArray class]]
+        ? ((NSArray *)items).firstObject : items;
+    if (!chatItem) {
+        debugLog(@"deriveThreadIdentifier: parent has no chat items");
+        return nil;
+    }
+
+    IMCreateThreadIdentifierForMessagePartChatItemFn fn =
+        imCreateThreadIdentifierFn();
+    if (!fn) {
+        debugLog(@"deriveThreadIdentifier: IMCreateThreadIdentifier… symbol not found");
+        return nil;
+    }
+    NSString *result = fn(chatItem);
+    debugLog(@"deriveThreadIdentifier: parent=%@ result=%@",
+             parentGuid, result ?: @"(nil)");
+    return result;
+}
+
 /// Dispatch a built IMMessage into the chat. On macOS 26 the public
 /// `-[IMChat sendMessage:]` silently no-ops on items with `sender = nil`;
 /// `_sendMessage:adjustingSender:shouldQueue:` makes IMChat fill the sender
@@ -1332,10 +1445,24 @@ static NSDictionary *handleSendMessage(NSInteger requestId, NSDictionary *params
     NSRange zeroRange = NSMakeRange(0, body.length);
     long long associatedType = selectedMessageGuid.length ? 100 : 0;
 
+    // Reply targets need a derived thread identifier on macOS 26 to render
+    // as a threaded in-line reply rather than a standalone message — the
+    // associated_message_guid alone isn't enough on the receiver. Best-effort:
+    // if we can't derive (parent not loadable, IMCore symbol missing) we
+    // still send with the associated fields and let the receiver render
+    // a quoted reply.
+    id parentMessage = nil;
+    NSString *threadIdentifier = nil;
+    if (selectedMessageGuid.length) {
+        threadIdentifier = deriveThreadIdentifier(selectedMessageGuid, &parentMessage);
+        debugLog(@"handleSendMessage: parent=%@ threadId=%@",
+                 selectedMessageGuid, threadIdentifier ?: @"(none)");
+    }
+
     @try {
         id imMessage = buildIMMessage(body, subjectAttr,
                                       effectId,
-                                      /*threadIdentifier*/ nil,
+                                      threadIdentifier,
                                       selectedMessageGuid,
                                       associatedType,
                                       zeroRange,
@@ -1345,6 +1472,20 @@ static NSDictionary *handleSendMessage(NSInteger requestId, NSDictionary *params
                                       ddScan);
         if (!imMessage) {
             return errorResponse(requestId, @"Could not construct IMMessage");
+        }
+
+        // Set thread originator on the wrapped message too — some receivers
+        // expect both setThreadIdentifier on the item and setThreadOriginator
+        // on the IMMessage to render as a thread.
+        if (parentMessage
+            && [imMessage respondsToSelector:@selector(setThreadOriginator:)]) {
+            [imMessage performSelector:@selector(setThreadOriginator:)
+                            withObject:parentMessage];
+        }
+        if (threadIdentifier
+            && [imMessage respondsToSelector:@selector(setThreadIdentifier:)]) {
+            [imMessage performSelector:@selector(setThreadIdentifier:)
+                            withObject:threadIdentifier];
         }
 
         if (gHasSendMessageReason && ddScan) {
@@ -1683,22 +1824,82 @@ static NSDictionary *handleSendReaction(NSInteger requestId, NSDictionary *param
             [NSString stringWithFormat:@"Unknown reactionType: %@", reactionType]);
     }
 
-    NSAttributedString *body = buildPlainAttributed(@"", partIndex);
-    NSDictionary *summary = @{
-        @"amc": selectedMessageGuid,
-        @"ams": @"",
-    };
-    @try {
-        id imMessage = buildIMMessage(body, nil, nil, nil,
-                                      selectedMessageGuid,
-                                      associatedType,
-                                      NSMakeRange(0, 1),
-                                      summary,
-                                      @[], NO, NO);
-        if (!imMessage) {
-            return errorResponse(requestId, @"Could not build reaction IMMessage");
+    // On macOS 26, building a reaction via the generic IMMessageItem-first
+    // path doesn't preserve the associated-message fields (the 9-arg item
+    // initializer doesn't accept them, and post-init setters don't survive
+    // the wrap). Use the dedicated reaction class method that takes all the
+    // metadata atomically.
+    Class IMMessageClass = NSClassFromString(@"IMMessage");
+    SEL reactSel = @selector(instantMessageWithAssociatedMessageContent:associatedMessageGUID:associatedMessageType:associatedMessageRange:associatedMessageEmoji:messageSummaryInfo:threadIdentifier:);
+    if (![IMMessageClass respondsToSelector:reactSel]) {
+        return errorResponse(requestId,
+            @"+instantMessageWithAssociatedMessageContent:... not available");
+    }
+
+    NSAttributedString *content = buildPlainAttributed(@"", partIndex);
+    NSRange targetRange = NSMakeRange(0, 1);
+    NSDictionary *summaryInfo = nil;
+    NSString *threadId = nil;
+    NSString *emojiArg = nil;
+
+    // Reaction `associatedMessageGUID` needs a `p:<part>/<parent-guid>`
+    // prefix — that's the canonical part-targeted reference iMessage uses
+    // for tapbacks. Passing the raw parent guid produces a message that
+    // dispatches without error but never persists in chat.db.
+    NSString *associatedRef = [selectedMessageGuid hasPrefix:@"p:"]
+        ? selectedMessageGuid
+        : [NSString stringWithFormat:@"p:%ld/%@",
+                                     (long)partIndex, selectedMessageGuid];
+
+    NSMethodSignature *sig = [IMMessageClass methodSignatureForSelector:reactSel];
+    NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
+    [inv setSelector:reactSel];
+    [inv setTarget:IMMessageClass];
+    [inv setArgument:&content atIndex:2];
+    [inv setArgument:&associatedRef atIndex:3];
+    [inv setArgument:&associatedType atIndex:4];
+    [inv setArgument:&targetRange atIndex:5];
+    [inv setArgument:&emojiArg atIndex:6];
+    [inv setArgument:&summaryInfo atIndex:7];
+    [inv setArgument:&threadId atIndex:8];
+    [inv retainArguments];
+    id imMessage = invokeReturningObject(inv);
+    if (!imMessage) {
+        return errorResponse(requestId, @"Reaction constructor returned nil");
+    }
+    debugLog(@"handleSendReaction: built target=%@ type=%lld msg_class=%@",
+             selectedMessageGuid, associatedType,
+             NSStringFromClass([imMessage class]));
+
+    // Same macOS 26 workaround as `buildIMMessage`: the high-level reaction
+    // constructor returns a message whose underlying IMMessageItem has empty
+    // `bodyData`, which imagent silently drops. Force-archive the placeholder
+    // body and assign via `setBodyData:` on the wrapped item before dispatch.
+    if ([imMessage respondsToSelector:@selector(_imMessageItem)]) {
+        id item = [imMessage performSelector:@selector(_imMessageItem)];
+        NSData *existingBody = item
+            && [item respondsToSelector:@selector(bodyData)]
+            ? [item performSelector:@selector(bodyData)] : nil;
+        if (existingBody.length == 0
+            && [item respondsToSelector:@selector(setBodyData:)]) {
+            @try {
+                #pragma clang diagnostic push
+                #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+                NSData *typedstream =
+                    [NSArchiver archivedDataWithRootObject:content];
+                #pragma clang diagnostic pop
+                [item performSelector:@selector(setBodyData:) withObject:typedstream];
+                debugLog(@"handleSendReaction: seeded bodyData (%lu bytes)",
+                         (unsigned long)typedstream.length);
+            } @catch (__unused NSException *e) {
+                debugLog(@"handleSendReaction: bodyData seed threw");
+            }
         }
+    }
+
+    @try {
         dispatchIMMessageInChat(chat, imMessage);
+        debugLog(@"handleSendReaction: dispatched");
         NSString *guid = lastSentMessageGuid(chat);
         return successResponse(requestId, @{
             @"chatGuid": chatGuid,
