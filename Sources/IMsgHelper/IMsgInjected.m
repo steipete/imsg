@@ -1173,15 +1173,25 @@ static id buildIMMessage(NSAttributedString *body,
                          NSArray *fileTransferGuids,
                          BOOL isAudioMessage,
                          BOOL ddScan) {
-    id viaItem = constructIMMessageViaItem(body, subject, effectId,
-                                            threadIdentifier,
-                                            associatedMessageGuid,
-                                            associatedMessageType,
-                                            associatedMessageRange,
-                                            summaryInfo,
-                                            fileTransferGuids,
-                                            isAudioMessage);
-    if (viaItem) return viaItem;
+    // Reactions (associatedMessageGuid + type > 0) need the associated
+    // fields set atomically in the initializer — IMMessageItem's 9-arg init
+    // doesn't accept them, and post-init setters don't survive the wrap on
+    // macOS 26. Skip the IMMessageItem-first path for reactions and use the
+    // long initIMMessageWith…:associatedMessageGUID: form below, which is
+    // what's worked historically for tapbacks (chat.db row 5078 in the
+    // dev-machine smoke test was sent via this path).
+    BOOL isReaction = associatedMessageGuid.length && associatedMessageType > 0;
+    if (!isReaction) {
+        id viaItem = constructIMMessageViaItem(body, subject, effectId,
+                                                threadIdentifier,
+                                                associatedMessageGuid,
+                                                associatedMessageType,
+                                                associatedMessageRange,
+                                                summaryInfo,
+                                                fileTransferGuids,
+                                                isAudioMessage);
+        if (viaItem) return viaItem;
+    }
     // Legacy fallback for older macOS that doesn't expose the
     // IMMessageItem 9-arg initializer or +messageFromIMMessageItem:.
     Class messageClass = NSClassFromString(@"IMMessage");
@@ -1824,82 +1834,40 @@ static NSDictionary *handleSendReaction(NSInteger requestId, NSDictionary *param
             [NSString stringWithFormat:@"Unknown reactionType: %@", reactionType]);
     }
 
-    // On macOS 26, building a reaction via the generic IMMessageItem-first
-    // path doesn't preserve the associated-message fields (the 9-arg item
-    // initializer doesn't accept them, and post-init setters don't survive
-    // the wrap). Use the dedicated reaction class method that takes all the
-    // metadata atomically.
-    Class IMMessageClass = NSClassFromString(@"IMMessage");
-    SEL reactSel = @selector(instantMessageWithAssociatedMessageContent:associatedMessageGUID:associatedMessageType:associatedMessageRange:associatedMessageEmoji:messageSummaryInfo:threadIdentifier:);
-    if (![IMMessageClass respondsToSelector:reactSel]) {
-        return errorResponse(requestId,
-            @"+instantMessageWithAssociatedMessageContent:... not available");
-    }
-
-    NSAttributedString *content = buildPlainAttributed(@"", partIndex);
-    NSRange targetRange = NSMakeRange(0, 1);
-    NSDictionary *summaryInfo = nil;
-    NSString *threadId = nil;
-    NSString *emojiArg = nil;
-
-    // Reaction `associatedMessageGUID` needs a `p:<part>/<parent-guid>`
-    // prefix — that's the canonical part-targeted reference iMessage uses
-    // for tapbacks. Passing the raw parent guid produces a message that
-    // dispatches without error but never persists in chat.db.
+    // Reactions need the `p:<part>/<parent-guid>` prefix — iMessage's
+    // canonical part-targeted reference for tapbacks. The receiver
+    // pipeline ignores reaction messages whose associatedMessageGUID is a
+    // bare guid (no part prefix).
     NSString *associatedRef = [selectedMessageGuid hasPrefix:@"p:"]
         ? selectedMessageGuid
         : [NSString stringWithFormat:@"p:%ld/%@",
                                      (long)partIndex, selectedMessageGuid];
+    debugLog(@"handleSendReaction: target=%@ type=%lld", associatedRef, associatedType);
 
-    NSMethodSignature *sig = [IMMessageClass methodSignatureForSelector:reactSel];
-    NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
-    [inv setSelector:reactSel];
-    [inv setTarget:IMMessageClass];
-    [inv setArgument:&content atIndex:2];
-    [inv setArgument:&associatedRef atIndex:3];
-    [inv setArgument:&associatedType atIndex:4];
-    [inv setArgument:&targetRange atIndex:5];
-    [inv setArgument:&emojiArg atIndex:6];
-    [inv setArgument:&summaryInfo atIndex:7];
-    [inv setArgument:&threadId atIndex:8];
-    [inv retainArguments];
-    id imMessage = invokeReturningObject(inv);
-    if (!imMessage) {
-        return errorResponse(requestId, @"Reaction constructor returned nil");
-    }
-    debugLog(@"handleSendReaction: built target=%@ type=%lld msg_class=%@",
-             selectedMessageGuid, associatedType,
-             NSStringFromClass([imMessage class]));
-
-    // Same macOS 26 workaround as `buildIMMessage`: the high-level reaction
-    // constructor returns a message whose underlying IMMessageItem has empty
-    // `bodyData`, which imagent silently drops. Force-archive the placeholder
-    // body and assign via `setBodyData:` on the wrapped item before dispatch.
-    if ([imMessage respondsToSelector:@selector(_imMessageItem)]) {
-        id item = [imMessage performSelector:@selector(_imMessageItem)];
-        NSData *existingBody = item
-            && [item respondsToSelector:@selector(bodyData)]
-            ? [item performSelector:@selector(bodyData)] : nil;
-        if (existingBody.length == 0
-            && [item respondsToSelector:@selector(setBodyData:)]) {
-            @try {
-                #pragma clang diagnostic push
-                #pragma clang diagnostic ignored "-Wdeprecated-declarations"
-                NSData *typedstream =
-                    [NSArchiver archivedDataWithRootObject:content];
-                #pragma clang diagnostic pop
-                [item performSelector:@selector(setBodyData:) withObject:typedstream];
-                debugLog(@"handleSendReaction: seeded bodyData (%lu bytes)",
-                         (unsigned long)typedstream.length);
-            } @catch (__unused NSException *e) {
-                debugLog(@"handleSendReaction: bodyData seed threw");
-            }
-        }
-    }
-
+    // Build via the long initIMMessageWith…:associatedMessageGUID: path —
+    // buildIMMessage skips its IMMessageItem-first short-circuit when an
+    // associated message is set, so this routes through the legacy
+    // initializer which accepts all reaction fields atomically.
+    NSAttributedString *body = buildPlainAttributed(@"", partIndex);
+    NSDictionary *summary = @{ @"amc": selectedMessageGuid, @"ams": @"" };
     @try {
-        dispatchIMMessageInChat(chat, imMessage);
-        debugLog(@"handleSendReaction: dispatched");
+        id imMessage = buildIMMessage(body, /*subject*/ nil, /*effect*/ nil,
+                                      /*threadIdentifier*/ nil,
+                                      associatedRef,
+                                      associatedType,
+                                      NSMakeRange(0, 1),
+                                      summary,
+                                      /*fileTransferGuids*/ @[],
+                                      /*isAudio*/ NO,
+                                      /*ddScan*/ NO);
+        if (!imMessage) {
+            return errorResponse(requestId, @"Could not build reaction IMMessage");
+        }
+        // Use the simpler public sendMessage: for reactions — adjustingSender
+        // appears to interfere with the reaction-message path on macOS 26
+        // even when the public path works.
+        [chat performSelector:@selector(sendMessage:) withObject:imMessage];
+        debugLog(@"handleSendReaction: dispatched via sendMessage:");
         NSString *guid = lastSentMessageGuid(chat);
         return successResponse(requestId, @{
             @"chatGuid": chatGuid,
