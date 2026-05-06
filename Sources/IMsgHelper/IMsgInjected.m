@@ -156,6 +156,7 @@ static void probeSelectors(void) {
 - (id)account;
 - (NSString *)displayNameForChat;
 - (void)sendMessage:(id)message;
+- (void)_sendMessage:(id)message adjustingSender:(BOOL)adjust shouldQueue:(BOOL)queue;
 - (void)leaveChat;
 - (void)setDisplayName:(NSString *)name;
 - (void)setUnreadCount:(NSInteger)count;
@@ -170,12 +171,36 @@ static void probeSelectors(void) {
 - (NSAttributedString *)text;
 - (NSAttributedString *)subject;
 - (NSArray *)fileTransferGUIDs;
+- (id)_imMessageItem;
+- (void)_updateText:(NSAttributedString *)attributedText;
+- (void)setThreadIdentifier:(NSString *)threadIdentifier;
++ (id)messageFromIMMessageItem:(id)item sender:(id)sender subject:(id)subject;
 @end
 
 @interface IMMessageItem : NSObject
 - (NSString *)guid;
 - (NSArray *)_newChatItems;
 - (id)message;
+- (NSData *)bodyData;
+- (id)body;
+- (void)setBodyData:(NSData *)data;
+- (void)_regenerateBodyData;
+- (id)initWithSender:(id)sender
+                time:(NSDate *)time
+                body:(NSAttributedString *)body
+          attributes:(NSDictionary *)attributes
+   fileTransferGUIDs:(NSArray *)fileTransferGUIDs
+               flags:(unsigned long long)flags
+               error:(NSError *)error
+                guid:(NSString *)guid
+    threadIdentifier:(NSString *)threadIdentifier;
+- (void)setExpressiveSendStyleID:(NSString *)styleID;
+- (void)setSubject:(NSString *)subject;
+- (void)setMessageSubject:(NSAttributedString *)subject;
+- (void)setAssociatedMessageGUID:(NSString *)guid;
+- (void)setAssociatedMessageType:(long long)type;
+- (void)setAssociatedMessageRange:(NSRange)range;
+- (void)setMessageSummaryInfo:(NSDictionary *)info;
 @end
 
 @interface IMMessagePartChatItem : NSObject
@@ -808,9 +833,222 @@ static NSMutableAttributedString *buildFormattedAttributed(NSString *text,
 
 #pragma mark - IMMessage Builder
 
+/// Invoke a class method that returns an object, returning a strongly
+/// retained id. NSInvocation returns object references without transferring
+/// ownership, so we read into an `__unsafe_unretained` slot then assign to a
+/// strong variable to balance ARC.
+static id invokeReturningObject(NSInvocation *inv) {
+    __unsafe_unretained id raw = nil;
+    [inv invoke];
+    [inv getReturnValue:&raw];
+    return raw;
+}
+
+/// Apply optional metadata fields directly onto the IMMessageItem before
+/// the IMMessage wrap. Setters on a wrapped IMMessage's `_imMessageItem`
+/// don't persist (the wrap returns a transient item rebuilt each call), so
+/// extended fields like `expressiveSendStyleID` and `associatedMessageGUID`
+/// must be applied here, ahead of the wrap.
+static void applyItemExtendedFields(id item,
+                                    NSAttributedString *subject,
+                                    NSString *effectId,
+                                    NSString *associatedMessageGuid,
+                                    long long associatedMessageType,
+                                    NSRange associatedMessageRange,
+                                    NSDictionary *summaryInfo) {
+    if (!item) return;
+    if (subject.length
+        && [item respondsToSelector:@selector(setMessageSubject:)]) {
+        [item performSelector:@selector(setMessageSubject:) withObject:subject];
+    }
+    if (effectId.length
+        && [item respondsToSelector:@selector(setExpressiveSendStyleID:)]) {
+        [item performSelector:@selector(setExpressiveSendStyleID:)
+                   withObject:effectId];
+    }
+    if (associatedMessageGuid.length && associatedMessageType > 0) {
+        if ([item respondsToSelector:@selector(setAssociatedMessageGUID:)]) {
+            [item performSelector:@selector(setAssociatedMessageGUID:)
+                       withObject:associatedMessageGuid];
+        }
+        if ([item respondsToSelector:@selector(setAssociatedMessageType:)]) {
+            NSMethodSignature *sig = [item methodSignatureForSelector:
+                @selector(setAssociatedMessageType:)];
+            NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
+            [inv setSelector:@selector(setAssociatedMessageType:)];
+            [inv setTarget:item];
+            [inv setArgument:&associatedMessageType atIndex:2];
+            [inv invoke];
+        }
+        if ([item respondsToSelector:@selector(setAssociatedMessageRange:)]) {
+            NSMethodSignature *sig = [item methodSignatureForSelector:
+                @selector(setAssociatedMessageRange:)];
+            NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
+            [inv setSelector:@selector(setAssociatedMessageRange:)];
+            [inv setTarget:item];
+            NSRange range = associatedMessageRange;
+            [inv setArgument:&range atIndex:2];
+            [inv invoke];
+        }
+        if (summaryInfo
+            && [item respondsToSelector:@selector(setMessageSummaryInfo:)]) {
+            [item performSelector:@selector(setMessageSummaryInfo:)
+                       withObject:summaryInfo];
+        }
+    }
+}
+
+/// Build an IMMessageItem with the body set up-front, apply any extended
+/// metadata fields onto the item, then wrap with IMMessage. On macOS 26 the
+/// high-level `+initIMMessageWith…` factories build a transient
+/// IMMessageItem on demand whose `body` / `bodyData` don't survive
+/// `[chat sendMessage:]` — imagent reads `bodyData` from the underlying
+/// item, sees nothing, and silently drops the message. Building the item
+/// up-front and seeding `bodyData` via NSArchiver is the only path that
+/// lands on macOS 26. Returns nil if the required selectors are missing
+/// (older OSes; caller should fall back).
+static id constructIMMessageViaItem(NSAttributedString *attributedText,
+                                    NSAttributedString *subject,
+                                    NSString *effectId,
+                                    NSString *threadIdentifier,
+                                    NSString *associatedMessageGuid,
+                                    long long associatedMessageType,
+                                    NSRange associatedMessageRange,
+                                    NSDictionary *summaryInfo,
+                                    NSArray *fileTransferGuids,
+                                    BOOL isAudioMessage) {
+    Class IMMessageClass = NSClassFromString(@"IMMessage");
+    Class IMMessageItemClass = NSClassFromString(@"IMMessageItem");
+    if (!IMMessageClass || !IMMessageItemClass) return nil;
+
+    SEL itemInitSel = @selector(initWithSender:time:body:attributes:fileTransferGUIDs:flags:error:guid:threadIdentifier:);
+    if (![IMMessageItemClass instancesRespondToSelector:itemInitSel]) return nil;
+
+    SEL wrapSel = @selector(messageFromIMMessageItem:sender:subject:);
+    if (![IMMessageClass respondsToSelector:wrapSel]) return nil;
+
+    id item = [IMMessageItemClass alloc];
+    if (!item) return nil;
+
+    NSDate *now = [NSDate date];
+    NSArray *transferGuids = fileTransferGuids ?: @[];
+    NSError *err = nil;
+    NSString *guid = [[NSUUID UUID] UUIDString];
+    // 0x5 = IMMessageItemFlagsFromMe | IMMessageItemFlagsFinished. Audio
+    // messages historically use 0x300005; subject-bearing messages 0x10000d.
+    // Items with `flags = 0` are dropped before reaching chat.db on macOS 26.
+    unsigned long long flags = isAudioMessage ? 0x300005ULL : 0x5ULL;
+    id sender = nil;
+    NSDictionary *attributes = nil;
+
+    NSMethodSignature *isig =
+        [IMMessageItemClass instanceMethodSignatureForSelector:itemInitSel];
+    NSInvocation *iinv = [NSInvocation invocationWithMethodSignature:isig];
+    [iinv setSelector:itemInitSel];
+    [iinv setTarget:item];
+    [iinv setArgument:&sender atIndex:2];
+    [iinv setArgument:&now atIndex:3];
+    [iinv setArgument:&attributedText atIndex:4];
+    [iinv setArgument:&attributes atIndex:5];
+    [iinv setArgument:&transferGuids atIndex:6];
+    [iinv setArgument:&flags atIndex:7];
+    [iinv setArgument:&err atIndex:8];
+    [iinv setArgument:&guid atIndex:9];
+    [iinv setArgument:&threadIdentifier atIndex:10];
+    [iinv retainArguments];
+    item = invokeReturningObject(iinv);
+    if (!item) return nil;
+
+    if ([item respondsToSelector:@selector(_regenerateBodyData)]) {
+        [item performSelector:@selector(_regenerateBodyData)];
+    }
+
+    NSData *bodyData = [item respondsToSelector:@selector(bodyData)]
+        ? [item performSelector:@selector(bodyData)] : nil;
+    // imagent reads bodyData (NSArchiver typedstream). On macOS 26 the
+    // initWithSender: path leaves bodyData empty; force-archive the
+    // attributed string ourselves so the daemon has a payload to ship.
+    if (bodyData.length == 0 && attributedText.length > 0
+        && [item respondsToSelector:@selector(setBodyData:)]) {
+        @try {
+            #pragma clang diagnostic push
+            #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+            NSData *typedstream = [NSArchiver archivedDataWithRootObject:attributedText];
+            #pragma clang diagnostic pop
+            if (typedstream.length > 0) {
+                [item performSelector:@selector(setBodyData:) withObject:typedstream];
+            }
+        } @catch (NSException *e) {
+            // NSArchiver chokes on NSPresentationIntent attributes that some
+            // markdown initializers emit. Retry with a plain copy.
+            NSMutableAttributedString *plain = [[NSMutableAttributedString alloc]
+                initWithString:[attributedText string]];
+            @try {
+                #pragma clang diagnostic push
+                #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+                NSData *plainData = [NSArchiver archivedDataWithRootObject:plain];
+                #pragma clang diagnostic pop
+                [item performSelector:@selector(setBodyData:) withObject:plainData];
+            } @catch (__unused NSException *e2) {
+                // Give up; the wrap below may still succeed for non-empty cases.
+            }
+        }
+    }
+
+    // Set extended fields on the item BEFORE wrapping. The IMMessage wrap's
+    // `_imMessageItem` accessor returns a transient item rebuilt each call,
+    // so post-wrap setters don't persist (per the macOS 26 behavior 10ce6ab
+    // documented).
+    applyItemExtendedFields(item, subject, effectId,
+                            associatedMessageGuid, associatedMessageType,
+                            associatedMessageRange, summaryInfo);
+
+    NSMethodSignature *wsig =
+        [IMMessageClass methodSignatureForSelector:wrapSel];
+    NSInvocation *winv = [NSInvocation invocationWithMethodSignature:wsig];
+    [winv setSelector:wrapSel];
+    [winv setTarget:IMMessageClass];
+    id nilSender = nil;
+    id nilSubject = nil;
+    [winv setArgument:&item atIndex:2];
+    [winv setArgument:&nilSender atIndex:3];
+    [winv setArgument:&nilSubject atIndex:4];
+    [winv retainArguments];
+    return invokeReturningObject(winv);
+}
+
+/// Dispatch a built IMMessage into the chat. On macOS 26 the public
+/// `-[IMChat sendMessage:]` silently no-ops on items with `sender = nil`;
+/// `_sendMessage:adjustingSender:shouldQueue:` makes IMChat fill the sender
+/// from its own account before handing off to imagent. Falls back to the
+/// public selector on older OSes that don't expose the private one.
+static void dispatchIMMessageInChat(IMChat *chat, id message) {
+    SEL adjustSel = @selector(_sendMessage:adjustingSender:shouldQueue:);
+    if ([chat respondsToSelector:adjustSel]) {
+        NSMethodSignature *sig = [chat methodSignatureForSelector:adjustSel];
+        NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
+        [inv setSelector:adjustSel];
+        [inv setTarget:chat];
+        __unsafe_unretained id m = message;
+        BOOL adjust = YES;
+        BOOL queue = NO;
+        [inv setArgument:&m atIndex:2];
+        [inv setArgument:&adjust atIndex:3];
+        [inv setArgument:&queue atIndex:4];
+        [inv invoke];
+        return;
+    }
+    [chat performSelector:@selector(sendMessage:) withObject:message];
+}
+
 /// Build an IMMessage suitable for `[chat sendMessage:]`. Handles plain text,
 /// optional subject, optional effect (`com.apple.MobileSMS.expressivesend.*`),
 /// optional reply target (`selectedMessageGuid`), and ddScan flag.
+///
+/// On macOS 26 `+initIMMessageWith…` returns a message whose underlying
+/// IMMessageItem has empty `bodyData`, which imagent silently drops. Try the
+/// IMMessageItem-first path first; fall back to the legacy initializer for
+/// older OSes that don't expose the modern item-construction selectors.
 static id buildIMMessage(NSAttributedString *body,
                          NSAttributedString *subject,
                          NSString *effectId,
@@ -822,6 +1060,17 @@ static id buildIMMessage(NSAttributedString *body,
                          NSArray *fileTransferGuids,
                          BOOL isAudioMessage,
                          BOOL ddScan) {
+    id viaItem = constructIMMessageViaItem(body, subject, effectId,
+                                            threadIdentifier,
+                                            associatedMessageGuid,
+                                            associatedMessageType,
+                                            associatedMessageRange,
+                                            summaryInfo,
+                                            fileTransferGuids,
+                                            isAudioMessage);
+    if (viaItem) return viaItem;
+    // Legacy fallback for older macOS that doesn't expose the
+    // IMMessageItem 9-arg initializer or +messageFromIMMessageItem:.
     Class messageClass = NSClassFromString(@"IMMessage");
     if (!messageClass) return nil;
 
@@ -1115,7 +1364,7 @@ static NSDictionary *handleSendMessage(NSInteger requestId, NSDictionary *params
                 [inv invoke];
             });
         } else {
-            [chat performSelector:@selector(sendMessage:) withObject:imMessage];
+            dispatchIMMessageInChat(chat, imMessage);
         }
 
         // Best-effort messageGuid; not always available immediately.
@@ -1185,7 +1434,7 @@ static NSDictionary *handleSendMultipart(NSInteger requestId, NSDictionary *para
         if (!imMessage) {
             return errorResponse(requestId, @"Could not construct multipart IMMessage");
         }
-        [chat performSelector:@selector(sendMessage:) withObject:imMessage];
+        dispatchIMMessageInChat(chat, imMessage);
         NSString *guid = lastSentMessageGuid(chat);
         return successResponse(requestId, @{
             @"chatGuid": chatGuid,
@@ -1389,7 +1638,7 @@ static NSDictionary *handleSendAttachment(NSInteger requestId, NSDictionary *par
         if (!imMessage) {
             return errorResponse(requestId, @"Could not build IMMessage with attachment");
         }
-        [chat performSelector:@selector(sendMessage:) withObject:imMessage];
+        dispatchIMMessageInChat(chat, imMessage);
         NSString *guid = lastSentMessageGuid(chat);
         return successResponse(requestId, @{
             @"chatGuid": chatGuid,
@@ -1449,7 +1698,7 @@ static NSDictionary *handleSendReaction(NSInteger requestId, NSDictionary *param
         if (!imMessage) {
             return errorResponse(requestId, @"Could not build reaction IMMessage");
         }
-        [chat performSelector:@selector(sendMessage:) withObject:imMessage];
+        dispatchIMMessageInChat(chat, imMessage);
         NSString *guid = lastSentMessageGuid(chat);
         return successResponse(requestId, @{
             @"chatGuid": chatGuid,
@@ -2001,7 +2250,7 @@ static NSDictionary *handleCreateChat(NSInteger requestId, NSDictionary *params)
                                           NSMakeRange(0, body.length),
                                           nil, @[], NO, NO);
             if (imMessage) {
-                [chat performSelector:@selector(sendMessage:) withObject:imMessage];
+                dispatchIMMessageInChat(chat, imMessage);
                 messageGuid = lastSentMessageGuid(chat);
             }
         } @catch (__unused NSException *ex) {}
