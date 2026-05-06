@@ -7,18 +7,17 @@ import IMsgCore
 enum SearchCommand {
   static let spec = CommandSpec(
     name: "search",
-    abstract: "Search messages via the IMCore bridge",
+    abstract: "Search local Messages history",
     discussion: """
-      Server-side search isn't fully wired in v1; this command currently
-      surfaces whatever the bridge returns (note: "not yet implemented")
-      and is intended to be the future home of full-fidelity search.
-      For now, fall back to `imsg history --json | grep`.
+      Searches the local chat.db, not the injected bridge. Use --match exact
+      for case-insensitive exact text matches; the default is contains.
       """,
     signature: CommandSignatures.withRuntimeFlags(
       CommandSignature(
         options: CommandSignatures.baseOptions() + [
           .make(label: "query", names: [.long("query")], help: "search query (required)"),
           .make(label: "match", names: [.long("match")], help: "exact|contains (default contains)"),
+          .make(label: "limit", names: [.long("limit")], help: "maximum results (default 50)"),
         ]
       )
     ),
@@ -27,20 +26,49 @@ enum SearchCommand {
     try await run(values: values, runtime: runtime)
   }
 
-  static func run(values: ParsedValues, runtime: RuntimeOptions) async throws {
+  static func run(
+    values: ParsedValues,
+    runtime: RuntimeOptions,
+    contactResolverFactory: @escaping () async -> any ContactResolving = {
+      await ContactResolver.create()
+    }
+  ) async throws {
     guard let q = values.option("query"), !q.isEmpty else {
       throw ParsedValuesError.missingOption("query")
     }
-    let params: [String: Any] = [
-      "query": q,
-      "matchType": values.option("match") ?? "contains",
-    ]
-    _ = try await BridgeOutput.invokeAndEmit(
-      action: .searchMessages, params: params, runtime: runtime
-    ) { data in
-      let count = (data["results"] as? [[String: Any]])?.count ?? 0
-      let note = (data["note"] as? String) ?? ""
-      return "search: \(count) result\(count == 1 ? "" : "s")\(note.isEmpty ? "" : " — \(note)")"
+    let match = values.option("match") ?? "contains"
+    guard match == "contains" || match == "exact" else {
+      throw ParsedValuesError.invalidOption("match")
+    }
+    let dbPath = values.option("db") ?? MessageStore.defaultPath
+    let limit = values.optionInt("limit") ?? 50
+    let store = try MessageStore(path: dbPath)
+    let messages = try store.searchMessages(query: q, match: match, limit: limit)
+    let contacts = await contactResolverFactory()
+
+    if runtime.jsonOutput {
+      let cache = ChatCache(store: store)
+      for message in messages {
+        let payload = try await buildMessagePayload(
+          store: store,
+          cache: cache,
+          message: message,
+          includeAttachments: false,
+          includeReactions: false,
+          contactResolver: contacts
+        )
+        try JSONLines.printObject(payload)
+      }
+      return
+    }
+
+    for message in messages {
+      let direction = message.isFromMe ? "sent" : "recv"
+      let timestamp = CLIISO8601.format(message.date)
+      let sender =
+        message.isFromMe
+        ? message.sender : (contacts.displayName(for: message.sender) ?? message.sender)
+      StdoutWriter.writeLine("\(timestamp) [\(direction)] \(sender): \(message.text)")
     }
   }
 }
@@ -52,9 +80,10 @@ enum AccountCommand {
     name: "account",
     abstract: "Show the active iMessage account, login, and aliases",
     discussion: nil,
-    signature: CommandSignatures.withRuntimeFlags(CommandSignature(
-      options: CommandSignatures.baseOptions()
-    )),
+    signature: CommandSignatures.withRuntimeFlags(
+      CommandSignature(
+        options: CommandSignatures.baseOptions()
+      )),
     usageExamples: ["imsg account"]
   ) { values, runtime in
     try await run(values: values, runtime: runtime)
@@ -123,7 +152,7 @@ enum NicknameCommand {
     signature: CommandSignatures.withRuntimeFlags(
       CommandSignature(
         options: CommandSignatures.baseOptions() + [
-          .make(label: "address", names: [.long("address")], help: "phone or email"),
+          .make(label: "address", names: [.long("address")], help: "phone or email")
         ]
       )
     ),

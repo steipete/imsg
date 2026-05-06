@@ -315,6 +315,10 @@ imsg account                                            # active iMessage accoun
 imsg whois --address +15551234567 --type phone
 imsg whois --address foo@bar.com --type email
 imsg nickname --address +15551234567
+```
+
+Local history search (does not require the bridge):
+```bash
 imsg search --query "pizza" --match contains
 ```
 

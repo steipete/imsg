@@ -107,6 +107,27 @@ func historyCommandJsonReportsDirectChatMetadata() async throws {
 }
 
 @Test
+func searchCommandUsesLocalMessageStore() async throws {
+  let path = try CommandTestDatabase.makePath()
+  let values = ParsedValues(
+    positional: [],
+    options: ["db": [path], "query": ["ell"], "match": ["contains"]],
+    flags: ["jsonOutput"]
+  )
+  let runtime = RuntimeOptions(parsedValues: values)
+  let (output, _) = try await StdoutCapture.capture {
+    try await SearchCommand.run(
+      values: values,
+      runtime: runtime,
+      contactResolverFactory: { NoOpContactResolver() }
+    )
+  }
+  let payload = try jsonObject(from: output)
+  #expect(payload["text"] as? String == "hello")
+  #expect(payload["chat_id"] as? Int == 1)
+}
+
+@Test
 func historyCommandRunsWithAttachmentsNonJson() async throws {
   let path = try CommandTestDatabase.makePathWithAttachment()
   let values = ParsedValues(

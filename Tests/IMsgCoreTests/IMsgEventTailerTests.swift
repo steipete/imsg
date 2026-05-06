@@ -58,6 +58,52 @@ struct IMsgEventTailerTests {
   }
 
   @Test
+  func tailerSkipsExistingLinesByDefault() async throws {
+    let dir = NSTemporaryDirectory() + "imsg-tailer-test-\(UUID().uuidString)"
+    try FileManager.default.createDirectory(
+      atPath: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+
+    let path = (dir as NSString).appendingPathComponent("events.jsonl")
+    let oldLine = """
+      {"event":"old-typing","data":{"chatGuid":"iMessage;-;+15551"}}
+      """ + "\n"
+    FileManager.default.createFile(
+      atPath: path,
+      contents: oldLine.data(using: .utf8),
+      attributes: nil
+    )
+
+    let tailer = IMsgEventTailer(path: path)
+    let stream = tailer.events()
+
+    Task.detached {
+      try? await Task.sleep(nanoseconds: 200_000_000)
+      let newLine = """
+        {"event":"started-typing","data":{"chatGuid":"iMessage;-;+15551"}}
+        """ + "\n"
+      let fp = fopen(path, "a")
+      if let fp = fp {
+        newLine.utf8CString.withUnsafeBufferPointer { buf in
+          guard let base = buf.baseAddress else { return }
+          fwrite(base, 1, strlen(base), fp)
+        }
+        fflush(fp)
+        fclose(fp)
+      }
+    }
+
+    var first: String?
+    for await event in stream {
+      first = event.name
+      break
+    }
+    tailer.stop()
+
+    #expect(first == "started-typing")
+  }
+
+  @Test
   func eventDecodedPayloadRoundTrip() throws {
     let raw: [String: Any] = ["chatGuid": "iMessage;-;+1", "extra": 42]
     let data = try JSONSerialization.data(withJSONObject: raw, options: [])

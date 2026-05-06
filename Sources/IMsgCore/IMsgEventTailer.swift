@@ -35,19 +35,20 @@ public final class IMsgEventTailer: @unchecked Sendable {
   }
 
   private let path: String
+  private let replayExisting: Bool
   private var source: DispatchSourceFileSystemObject?
   private var fd: Int32 = -1
-  private var offset: UInt64 = 0
   private var pending = Data()
   private var continuation: AsyncStream<Event>.Continuation?
   private let queue = DispatchQueue(label: "imsg.event.tailer")
 
-  public init(path: String) {
+  public init(path: String, replayExisting: Bool = false) {
     self.path = path
+    self.replayExisting = replayExisting
   }
 
-  /// Start tailing and return an AsyncStream of decoded events. Reads any
-  /// content already on disk first, then watches for additions.
+  /// Start tailing and return an AsyncStream of decoded events. Starts at EOF
+  /// by default so `watch --bb-events` only emits live events.
   public func events() -> AsyncStream<Event> {
     return AsyncStream { continuation in
       self.continuation = continuation
@@ -83,8 +84,11 @@ public final class IMsgEventTailer: @unchecked Sendable {
     let fd = open(path, O_RDONLY)
     if fd < 0 { return }
     self.fd = fd
-    self.offset = 0
-    drainAvailable()  // emit anything already there
+    if replayExisting {
+      drainAvailable()
+    } else {
+      lseek(fd, 0, SEEK_END)
+    }
 
     let src = DispatchSource.makeFileSystemObjectSource(
       fileDescriptor: fd,

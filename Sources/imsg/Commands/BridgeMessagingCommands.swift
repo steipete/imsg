@@ -55,9 +55,12 @@ enum SendRichCommand {
     signature: CommandSignatures.withRuntimeFlags(
       CommandSignature(
         options: CommandSignatures.baseOptions() + [
-          .make(label: "chat", names: [.long("chat")], help: "chat guid (e.g. iMessage;-;+15551234567)"),
+          .make(
+            label: "chat", names: [.long("chat")], help: "chat guid (e.g. iMessage;-;+15551234567)"),
           .make(label: "text", names: [.long("text")], help: "message body"),
-          .make(label: "effect", names: [.long("effect")], help: "expressive send id (impact, loud, gentle, invisibleink, confetti, …)"),
+          .make(
+            label: "effect", names: [.long("effect")],
+            help: "expressive send id (impact, loud, gentle, invisibleink, confetti, …)"),
           .make(label: "subject", names: [.long("subject")], help: "subject line"),
           .make(label: "replyTo", names: [.long("reply-to")], help: "guid of message to reply to"),
           .make(label: "part", names: [.long("part")], help: "part index (default 0)"),
@@ -65,10 +68,14 @@ enum SendRichCommand {
             label: "format",
             names: [.long("format")],
             help: "JSON array of {start,length,styles:[...]} ranges (macOS 15+)"),
-          .make(label: "formatFile", names: [.long("format-file")], help: "path to JSON file containing the format ranges array"),
+          .make(
+            label: "formatFile", names: [.long("format-file")],
+            help: "path to JSON file containing the format ranges array"),
         ],
         flags: [
-          .make(label: "noDDScan", names: [.long("no-dd-scan")], help: "disable data-detector scan deferral"),
+          .make(
+            label: "noDDScan", names: [.long("no-dd-scan")],
+            help: "disable data-detector scan deferral")
         ]
       )
     ),
@@ -144,7 +151,9 @@ enum SendMultipartCommand {
         options: CommandSignatures.baseOptions() + [
           .make(label: "chat", names: [.long("chat")], help: "chat guid"),
           .make(label: "parts", names: [.long("parts")], help: "JSON array of parts"),
-          .make(label: "partsFile", names: [.long("parts-file")], help: "path to JSON file containing parts array"),
+          .make(
+            label: "partsFile", names: [.long("parts-file")],
+            help: "path to JSON file containing parts array"),
           .make(label: "effect", names: [.long("effect")], help: "expressive send id"),
           .make(label: "subject", names: [.long("subject")], help: "subject line"),
         ]
@@ -203,7 +212,7 @@ enum SendAttachmentCommand {
           .make(label: "file", names: [.long("file")], help: "absolute path to file"),
         ],
         flags: [
-          .make(label: "audio", names: [.long("audio")], help: "send as audio message"),
+          .make(label: "audio", names: [.long("audio")], help: "send as audio message")
         ]
       )
     ),
@@ -251,11 +260,15 @@ enum BridgeReactCommand {
         options: CommandSignatures.baseOptions() + [
           .make(label: "chat", names: [.long("chat")], help: "chat guid"),
           .make(label: "message", names: [.long("message")], help: "target message guid"),
-          .make(label: "kind", names: [.long("kind")], help: "love|like|dislike|laugh|emphasize|question"),
+          .make(
+            label: "kind", names: [.long("kind")],
+            help: "love|like|dislike|laugh|emphasize|question"),
           .make(label: "part", names: [.long("part")], help: "part index"),
         ],
         flags: [
-          .make(label: "remove", names: [.long("remove")], help: "remove this reaction instead of adding"),
+          .make(
+            label: "remove", names: [.long("remove")],
+            help: "remove this reaction instead of adding")
         ]
       )
     ),

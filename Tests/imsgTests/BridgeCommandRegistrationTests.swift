@@ -15,12 +15,13 @@ func commandRouterIncludesAllBridgeCommands() {
     "chat-create", "chat-name", "chat-photo",
     "chat-add-member", "chat-remove-member",
     "chat-leave", "chat-delete", "chat-mark",
-    "search", "account", "whois", "nickname",
+    "account", "whois", "nickname",
   ]
   let registered = Set(router.specs.map { $0.name })
   for name in expected {
     #expect(registered.contains(name), "missing bridge command: \(name)")
   }
+  #expect(registered.contains("search"), "missing local search command")
 }
 
 @Test
@@ -43,7 +44,9 @@ func bridgeMessagingCommandsExposeChatRequirement() async {
 func chatMarkRejectsConflictingFlags() async {
   let router = CommandRouter()
   let (output, status) = await StdoutCapture.capture {
-    await router.run(argv: ["imsg", "chat-mark", "--chat", "iMessage;-;+15551234567", "--read", "--unread"])
+    await router.run(argv: [
+      "imsg", "chat-mark", "--chat", "iMessage;-;+15551234567", "--read", "--unread",
+    ])
   }
   #expect(status == 1)
   #expect(output.contains("Invalid value for option: --read"))

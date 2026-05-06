@@ -76,7 +76,8 @@ enum StatusCommand {
       StdoutWriter.writeLine("Advanced features (typing, read receipts):")
       if availability.available {
         StdoutWriter.writeLine("  Available - IMCore bridge connected")
-        StdoutWriter.writeLine("  bridge version: v\(bridgeVersion)\(v2Ready ? " (v2 inbox active)" : "")")
+        StdoutWriter.writeLine(
+          "  bridge version: v\(bridgeVersion)\(v2Ready ? " (v2 inbox active)" : "")")
         if !selectors.isEmpty {
           StdoutWriter.writeLine("  selectors:")
           for key in selectors.keys.sorted() {
@@ -88,8 +89,11 @@ enum StatusCommand {
         StdoutWriter.writeLine("Available bridge commands:")
         StdoutWriter.writeLine("  Send: imsg send-rich, send-multipart, send-attachment, tapback")
         StdoutWriter.writeLine("  Mutate: imsg edit, unsend, delete-message, notify-anyways")
-        StdoutWriter.writeLine("  Chat: imsg chat-create, chat-name, chat-photo, chat-add/remove-member, chat-leave/delete, chat-mark")
-        StdoutWriter.writeLine("  Introspect: imsg account, whois, nickname, search")
+        StdoutWriter.writeLine(
+          "  Chat: imsg chat-create, chat-name, chat-photo, chat-add/remove-member, chat-leave/delete, chat-mark"
+        )
+        StdoutWriter.writeLine("  Introspect: imsg account, whois, nickname")
+        StdoutWriter.writeLine("  Local DB: imsg search")
         StdoutWriter.writeLine("  Watch with events: imsg watch --bb-events")
       } else {
         StdoutWriter.writeLine("  Not available")

@@ -54,6 +54,9 @@ let package = Package(
             dependencies: [
                 "imsg",
                 "IMsgCore",
+            ],
+            exclude: [
+                "README-live.md",
             ]
         ),
     ]

@@ -1073,8 +1073,9 @@ static NSDictionary *handleSendMultipart(NSInteger requestId, NSDictionary *para
         : nil;
 
     @try {
+        long long associatedType = selectedMessageGuid.length ? 100 : 0;
         id imMessage = buildIMMessage(body, subjectAttr, effectId, nil,
-                                      selectedMessageGuid, 0,
+                                      selectedMessageGuid, associatedType,
                                       NSMakeRange(0, body.length),
                                       nil, @[], NO, NO);
         if (!imMessage) {

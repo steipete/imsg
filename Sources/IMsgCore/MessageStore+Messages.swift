@@ -1,7 +1,7 @@
 import Foundation
 import SQLite
 
-private struct MessageRowColumns {
+struct MessageRowColumns {
   static let balloonBundleID = "balloon_bundle_id"
 
   let rowID: String
@@ -43,7 +43,7 @@ private struct MessageRowColumns {
   }
 }
 
-private struct DecodedMessageRow {
+struct DecodedMessageRow {
   let rowID: Int64
   let chatID: Int64
   let handleID: Int64?
@@ -60,7 +60,7 @@ private struct DecodedMessageRow {
   let threadOriginatorGUID: String
 }
 
-private struct MessageRowSelection {
+struct MessageRowSelection {
   let selectList: String
   let columns: MessageRowColumns
 
@@ -422,7 +422,7 @@ extension MessageStore {
     }
   }
 
-  private func decodeMessageRow(
+  func decodeMessageRow(
     _ row: Row,
     columns: MessageRowColumns,
     fallbackChatID: Int64?

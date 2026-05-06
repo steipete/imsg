@@ -15,10 +15,13 @@ enum ChatCreateCommand {
     signature: CommandSignatures.withRuntimeFlags(
       CommandSignature(
         options: CommandSignatures.baseOptions() + [
-          .make(label: "addresses", names: [.long("addresses")], help: "comma-separated handles (phone or email)"),
+          .make(
+            label: "addresses", names: [.long("addresses")],
+            help: "comma-separated handles (phone or email)"),
           .make(label: "name", names: [.long("name")], help: "group display name"),
           .make(label: "text", names: [.long("text")], help: "initial message body"),
-          .make(label: "service", names: [.long("service")], help: "iMessage|SMS (default iMessage)"),
+          .make(
+            label: "service", names: [.long("service")], help: "iMessage|SMS (default iMessage)"),
         ]
       )
     ),
@@ -33,8 +36,10 @@ enum ChatCreateCommand {
     guard let raw = values.option("addresses"), !raw.isEmpty else {
       throw ParsedValuesError.missingOption("addresses")
     }
-    let addresses = raw.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }
-      .filter { !$0.isEmpty }
+    let addresses = raw.split(separator: ",").map {
+      String($0).trimmingCharacters(in: .whitespaces)
+    }
+    .filter { !$0.isEmpty }
     guard !addresses.isEmpty else { throw ParsedValuesError.invalidOption("addresses") }
 
     var params: [String: Any] = [
@@ -197,7 +202,7 @@ enum ChatLeaveCommand {
     signature: CommandSignatures.withRuntimeFlags(
       CommandSignature(
         options: CommandSignatures.baseOptions() + [
-          .make(label: "chat", names: [.long("chat")], help: "chat guid"),
+          .make(label: "chat", names: [.long("chat")], help: "chat guid")
         ]
       )
     ),
@@ -225,7 +230,7 @@ enum ChatDeleteCommand {
     signature: CommandSignatures.withRuntimeFlags(
       CommandSignature(
         options: CommandSignatures.baseOptions() + [
-          .make(label: "chat", names: [.long("chat")], help: "chat guid"),
+          .make(label: "chat", names: [.long("chat")], help: "chat guid")
         ]
       )
     ),
@@ -255,7 +260,7 @@ enum ChatMarkCommand {
     signature: CommandSignatures.withRuntimeFlags(
       CommandSignature(
         options: CommandSignatures.baseOptions() + [
-          .make(label: "chat", names: [.long("chat")], help: "chat guid"),
+          .make(label: "chat", names: [.long("chat")], help: "chat guid")
         ],
         flags: [
           .make(label: "read", names: [.long("read")], help: "mark as read"),
