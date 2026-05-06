@@ -277,8 +277,8 @@ enum ChatMarkCommand {
     }
     let read = values.flag("read")
     let unread = values.flag("unread")
-    if read == unread {
-      // Default to --read when neither (or both) flags supplied.
+    if read && unread {
+      throw ParsedValuesError.invalidOption("read")
     }
     let action: BridgeAction = unread ? .markChatUnread : .markChatRead
     let params: [String: Any] = ["chatGuid": chat]

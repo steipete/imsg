@@ -61,7 +61,10 @@ enum SendRichCommand {
           .make(label: "subject", names: [.long("subject")], help: "subject line"),
           .make(label: "replyTo", names: [.long("reply-to")], help: "guid of message to reply to"),
           .make(label: "part", names: [.long("part")], help: "part index (default 0)"),
-          .make(label: "format", names: [.long("format")], help: "JSON array of {start,length,styles:[bold|italic|underline|strikethrough]} ranges (macOS 15+)"),
+          .make(
+            label: "format",
+            names: [.long("format")],
+            help: "JSON array of {start,length,styles:[...]} ranges (macOS 15+)"),
           .make(label: "formatFile", names: [.long("format-file")], help: "path to JSON file containing the format ranges array"),
         ],
         flags: [

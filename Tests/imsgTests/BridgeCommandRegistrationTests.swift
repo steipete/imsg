@@ -38,3 +38,13 @@ func bridgeMessagingCommandsExposeChatRequirement() async {
     #expect(status == 1, "\(name) should have required missing args")
   }
 }
+
+@Test
+func chatMarkRejectsConflictingFlags() async {
+  let router = CommandRouter()
+  let (output, status) = await StdoutCapture.capture {
+    await router.run(argv: ["imsg", "chat-mark", "--chat", "iMessage;-;+15551234567", "--read", "--unread"])
+  }
+  #expect(status == 1)
+  #expect(output.contains("Invalid value for option: --read"))
+}

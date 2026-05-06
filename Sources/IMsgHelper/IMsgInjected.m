@@ -646,8 +646,8 @@ static NSAttributedString *buildPlainAttributed(NSString *text, NSInteger partIn
 /// Apply a JSON-shape array of text-formatting ranges to `text`. Each entry is
 /// `{ "start": int, "length": int, "styles": ["bold"|"italic"|"underline"|"strikethrough", ...] }`.
 /// macOS 15+ only — earlier OSes silently degrade to plain text (the private
-/// IMText* attribute names don't exist before Sequoia). Technique sourced from
-/// BlueBubbles-Server-Helper PR #50 (Nicell).
+/// IMText* attribute names don't exist before Sequoia). Attribute names and
+/// range shape are based on BlueBubbles helper PR #50; implementation is local.
 static NSMutableAttributedString *buildFormattedAttributed(NSString *text,
                                                             NSArray *formatting,
                                                             NSInteger partIndex) {
@@ -655,9 +655,12 @@ static NSMutableAttributedString *buildFormattedAttributed(NSString *text,
     NSMutableAttributedString *attr = [[NSMutableAttributedString alloc] initWithString:text];
     NSUInteger len = text.length;
 
-    // Always carry the message-part attribute across the whole string.
+    // Always carry the same base IM attributes as plain sends across the
+    // whole string, then layer style ranges on top when supported.
     if (len > 0) {
         [attr addAttribute:@"__kIMMessagePartAttributeName" value:@(partIndex)
+                     range:NSMakeRange(0, len)];
+        [attr addAttribute:@"__kIMBaseWritingDirectionAttributeName" value:@"-1"
                      range:NSMakeRange(0, len)];
     }
 
@@ -974,13 +977,14 @@ static NSDictionary *handleSendMessage(NSInteger requestId, NSDictionary *params
         : nil;
 
     NSRange zeroRange = NSMakeRange(0, body.length);
+    long long associatedType = selectedMessageGuid.length ? 100 : 0;
 
     @try {
         id imMessage = buildIMMessage(body, subjectAttr,
                                       effectId,
                                       /*threadIdentifier*/ nil,
                                       selectedMessageGuid,
-                                      /*associatedMessageType*/ 0,
+                                      associatedType,
                                       zeroRange,
                                       /*summaryInfo*/ nil,
                                       /*fileTransferGuids*/ @[],
