@@ -101,6 +101,10 @@ final class RPCServer {
         try await handleWatchUnsubscribe(id: id, params: params)
       case "send":
         try await handleSend(params: params, id: id)
+      case "typing":
+        try await handleTyping(params: params, id: id)
+      case "read":
+        try await handleRead(params: params, id: id)
       default:
         output.sendError(id: id, error: RPCError.methodNotFound(method))
       }

@@ -233,6 +233,87 @@ extension RPCServer {
     }
     respond(id: id, result: result)
   }
+
+  /// `typing` — start/stop the local-user typing indicator. Mirrors the
+  /// `imsg typing` CLI surface (which is purely a wrapper over `TypingIndicator`)
+  /// so callers that talk to `imsg rpc` over JSON-RPC have parity with the CLI.
+  func handleTyping(params: [String: Any], id: Any?) async throws {
+    let isTyping = boolParam(params["typing"]) ?? true
+    let serviceRaw = stringParam(params["service"]) ?? "imessage"
+    let input = ChatTargetInput(
+      recipient: stringParam(params["to"]) ?? "",
+      chatID: int64Param(params["chat_id"]),
+      chatIdentifier: stringParam(params["chat_identifier"]) ?? "",
+      chatGUID: stringParam(params["chat_guid"]) ?? ""
+    )
+    try ChatTargetResolver.validateRecipientRequirements(
+      input: input,
+      mixedTargetError: RPCError.invalidParams("use to or chat_*; not both"),
+      missingRecipientError: RPCError.invalidParams("to is required")
+    )
+    let resolvedTarget = try await ChatTargetResolver.resolveChatTarget(
+      input: input,
+      lookupChat: { chatID in try await cache.info(chatID: chatID) },
+      unknownChatError: { chatID in
+        RPCError.invalidParams("unknown chat_id \(chatID)")
+      }
+    )
+    let identifier: String
+    if let preferred = resolvedTarget.preferredIdentifier {
+      identifier = preferred
+    } else if input.hasChatTarget {
+      throw RPCError.invalidParams("missing chat identifier or guid")
+    } else {
+      do {
+        identifier = try ChatTargetResolver.directTypingIdentifier(
+          recipient: input.recipient,
+          serviceRaw: serviceRaw,
+          invalidServiceError: { RPCError.invalidParams($0) }
+        )
+      } catch let err as RPCError {
+        throw err
+      }
+    }
+    if isTyping {
+      try TypingIndicator.startTyping(chatIdentifier: identifier)
+    } else {
+      try TypingIndicator.stopTyping(chatIdentifier: identifier)
+    }
+    respond(id: id, result: ["ok": true])
+  }
+
+  /// `read` — mark all messages in a chat as read on this device, which also
+  /// fires a read-receipt to the sender if the chat has receipts enabled.
+  func handleRead(params: [String: Any], id: Any?) async throws {
+    let input = ChatTargetInput(
+      recipient: stringParam(params["to"]) ?? "",
+      chatID: int64Param(params["chat_id"]),
+      chatIdentifier: stringParam(params["chat_identifier"]) ?? "",
+      chatGUID: stringParam(params["chat_guid"]) ?? ""
+    )
+    try ChatTargetResolver.validateRecipientRequirements(
+      input: input,
+      mixedTargetError: RPCError.invalidParams("use to or chat_*; not both"),
+      missingRecipientError: RPCError.invalidParams("to is required")
+    )
+    let resolvedTarget = try await ChatTargetResolver.resolveChatTarget(
+      input: input,
+      lookupChat: { chatID in try await cache.info(chatID: chatID) },
+      unknownChatError: { chatID in
+        RPCError.invalidParams("unknown chat_id \(chatID)")
+      }
+    )
+    let handle: String
+    if let preferred = resolvedTarget.preferredIdentifier {
+      handle = preferred
+    } else if input.hasChatTarget {
+      throw RPCError.invalidParams("missing chat identifier or guid")
+    } else {
+      handle = input.recipient
+    }
+    try await IMCoreBridge.shared.markAsRead(handle: handle)
+    respond(id: id, result: ["ok": true])
+  }
 }
 
 func buildMessagePayload(
