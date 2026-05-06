@@ -1185,8 +1185,14 @@ static id buildIMMessage(NSAttributedString *body,
     // Reactions take a different code path entirely (macOS 26 init below) —
     // the IMMessageItem-first construction can't carry associated-message
     // fields atomically, and post-init setters don't survive the wrap.
+    //
+    // Attachments also bypass IMMessageItem-first: BB's `initWithSender:…:
+    // expressiveSendStyleID:` (further down) handles fileTransferGUIDs
+    // natively, and going through IMMessageItem-first appears to leave the
+    // attachment payload unfinalized even with the right flags.
     BOOL isReaction = associatedMessageGuid.length && associatedMessageType > 0;
-    if (!isReaction) {
+    BOOL hasAttachment = fileTransferGuids.count > 0;
+    if (!isReaction && !hasAttachment) {
         id viaItem = constructIMMessageViaItem(body, subject, effectId,
                                                 threadIdentifier,
                                                 associatedMessageGuid,
@@ -1773,9 +1779,15 @@ static IMFileTransfer *prepareOutgoingTransfer(NSURL *originalURL, NSString *fil
             [inv setArgument:&hi atIndex:4];
             [inv setArgument:&nilGuid atIndex:5];
             [inv setArgument:&ext atIndex:6];
+            [inv retainArguments];
             [inv invoke];
-            __unsafe_unretained NSString *persistentPath = nil;
-            [inv getReturnValue:&persistentPath];
+            __unsafe_unretained NSString *raw = nil;
+            [inv getReturnValue:&raw];
+            // Take a strong reference immediately — invocation returns an
+            // unretained pointer that ARC may release before the next use.
+            NSString *persistentPath = raw;
+            debugLog(@"prepareOutgoingTransfer: persistentPath=%@ filename=%@",
+                     persistentPath ?: @"(nil)", fn);
 
             if (persistentPath.length) {
                 NSURL *persistentURL = [NSURL fileURLWithPath:persistentPath];
@@ -1977,9 +1989,21 @@ static NSDictionary *handleSendReaction(NSInteger requestId, NSDictionary *param
     // One-shot probe: list every IMMessage class method that mentions
     // "associated" or "instant" so we can see what reaction constructors
     // macOS 26 actually exposes. This is intentionally noisy — gates itself
-    // off after the first call.
+    // off after the first call. Also dumps IMDPersistentAttachmentController
+    // methods so we can see what attachment-staging selectors are exposed.
     static dispatch_once_t probeOnce;
     dispatch_once(&probeOnce, ^{
+        Class pac = NSClassFromString(@"IMDPersistentAttachmentController");
+        unsigned int pn = 0;
+        Method *pm = class_copyMethodList(pac, &pn);
+        for (unsigned int i = 0; i < pn; i++) {
+            const char *name = sel_getName(method_getName(pm[i]));
+            if (strstr(name, "ersistent") || strstr(name, "ttachment")
+                || strstr(name, "ransfer") || strstr(name, "ath")) {
+                debugLog(@"  -[IMDPersistentAttachmentController %s]", name);
+            }
+        }
+        if (pm) free(pm);
         Class c = NSClassFromString(@"IMMessage");
         unsigned int n = 0;
         Method *m = class_copyMethodList(object_getClass(c), &n);
