@@ -177,10 +177,13 @@ static void probeSelectors(void) {
 - (void)sendMessage:(id)message;
 - (void)_sendMessage:(id)message adjustingSender:(BOOL)adjust shouldQueue:(BOOL)queue;
 - (void)leaveChat;
-- (void)setDisplayName:(NSString *)name;
-- (void)setUnreadCount:(NSInteger)count;
+- (void)_setDisplayName:(NSString *)name;
 - (BOOL)hasUnreadMessages;
 - (NSArray *)chatItems;
+- (void)inviteParticipantsToiMessageChat:(NSArray *)participants reason:(NSInteger)reason;
+- (void)markLastMessageAsUnread;
+- (void)markChatItemAsNotifyRecipient:(id)chatItem;
+- (void)sendGroupPhotoUpdate:(NSString *)transferGUID;
 @end
 
 @interface IMMessage : NSObject
@@ -1139,27 +1142,66 @@ static NSString *deriveThreadIdentifier(NSString *parentGuid,
     return result;
 }
 
-/// Dispatch a built IMMessage into the chat. On macOS 26 the public
-/// `-[IMChat sendMessage:]` silently no-ops on items with `sender = nil`;
-/// `_sendMessage:adjustingSender:shouldQueue:` makes IMChat fill the sender
-/// from its own account before handing off to imagent. Falls back to the
-/// public selector on older OSes that don't expose the private one.
-static void dispatchIMMessageInChat(IMChat *chat, id message) {
-    SEL adjustSel = @selector(_sendMessage:adjustingSender:shouldQueue:);
-    if ([chat respondsToSelector:adjustSel]) {
-        NSMethodSignature *sig = [chat methodSignatureForSelector:adjustSel];
-        NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
-        [inv setSelector:adjustSel];
-        [inv setTarget:chat];
-        __unsafe_unretained id m = message;
-        BOOL adjust = YES;
-        BOOL queue = NO;
-        [inv setArgument:&m atIndex:2];
-        [inv setArgument:&adjust atIndex:3];
-        [inv setArgument:&queue atIndex:4];
-        [inv invoke];
-        return;
+/// Load the parent message via `IMChatHistoryController` and return its
+/// first `IMMessagePartChatItem` plus the parent message itself. Used by
+/// reactions to derive the canonical `associatedMessageRange` (BB-verified:
+/// `[item messagePartRange]`, not a hardcoded `{0,1}`).
+///
+/// Block-based load semantics match `loadMessageWithGUID:completionBlock:`,
+/// which `deriveThreadIdentifier` already drives. This helper duplicates
+/// the load to keep the reply / reaction code paths independent (each
+/// fires its own load), which is what BlueBubblesHelper does too — and
+/// avoids gnarly out-parameter plumbing through deriveThreadIdentifier.
+static id loadParentFirstChatItem(NSString *parentGuid, id *outParentMessage) {
+    if (outParentMessage) *outParentMessage = nil;
+    if (parentGuid.length == 0) return nil;
+
+    Class hcClass = NSClassFromString(@"IMChatHistoryController");
+    if (!hcClass) return nil;
+    id hc = [hcClass performSelector:@selector(sharedInstance)];
+    SEL loadSel = @selector(loadMessageWithGUID:completionBlock:);
+    if (!hc || ![hc respondsToSelector:loadSel]) return nil;
+
+    __block id parent = nil;
+    __block BOOL done = NO;
+    NSMethodSignature *sig = [hc methodSignatureForSelector:loadSel];
+    NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
+    [inv setSelector:loadSel];
+    [inv setTarget:hc];
+    NSString *guid = parentGuid;
+    [inv setArgument:&guid atIndex:2];
+    void (^completion)(id) = ^(id m) { parent = m; done = YES; };
+    [inv setArgument:&completion atIndex:3];
+    [inv retainArguments];
+    [inv invoke];
+
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:3.0];
+    while (!done && [deadline timeIntervalSinceNow] > 0) {
+        [[NSRunLoop currentRunLoop]
+            runMode:NSDefaultRunLoopMode
+            beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
     }
+    if (!parent) return nil;
+    if (outParentMessage) *outParentMessage = parent;
+
+    if (![parent respondsToSelector:@selector(_imMessageItem)]) return nil;
+    id parentItem = [parent performSelector:@selector(_imMessageItem)];
+    SEL chatItemsSel = NSSelectorFromString(@"_newChatItems");
+    if (!parentItem || ![parentItem respondsToSelector:chatItemsSel]) return nil;
+    id items = [parentItem performSelector:chatItemsSel];
+    return [items isKindOfClass:[NSArray class]]
+        ? ((NSArray *)items).firstObject : items;
+}
+
+/// Dispatch a built IMMessage into the chat. BlueBubblesHelper uses the
+/// public `-[IMChat sendMessage:]` for every send (text, attachment,
+/// reaction, reply) on macOS 11+ — including macOS 26. It Just Works as
+/// long as the IMMessage has been built with a proper init (sender = nil
+/// is fine; IMChat's sendMessage: implementation fills it from the chat's
+/// account). The private `_sendMessage:adjustingSender:shouldQueue:` we
+/// were preferring earlier is unnecessary and may silently drop items in
+/// some macOS 26 states.
+static void dispatchIMMessageInChat(IMChat *chat, id message) {
     [chat performSelector:@selector(sendMessage:) withObject:message];
 }
 
@@ -1380,14 +1422,24 @@ static id buildIMMessage(NSAttributedString *body,
     return nil;
 }
 
-/// Async chat-item lookup. Calls cb on the main thread once items are loaded
-/// (or with nil if loading times out / no match). Note: the Messages.app
-/// IMChatHistoryController loads asynchronously into chat.chatItems; we issue
-/// the load and then poll for the matching guid.
+/// Look up a chat item by message guid. Tries BlueBubblesHelper's
+/// block-based `loadMessageWithGUID:completionBlock:` first — that path
+/// works for messages older than what's currently loaded into the live
+/// `chat.chatItems` window. Falls back to the older
+/// `loadedChatItemsForChat:beforeDate:limit:loadIfNeeded:` + sync poll
+/// for OSes that don't expose the block-based load.
 static id findMessageItem(IMChat *chat, NSString *messageGuid) {
     if (!chat || !messageGuid.length) {
         return nil;
     }
+
+    // BB-verified macOS 11+ path: block-based load via IMChatHistoryController
+    // (returns an IMMessage). Callers want the chat item, so navigate
+    // IMMessage → IMMessageItem → first IMMessagePartChatItem via the
+    // same accessor walk loadParentFirstChatItem performs.
+    id loadedChatItem = loadParentFirstChatItem(messageGuid, NULL);
+    if (loadedChatItem) return loadedChatItem;
+
     Class hcClass = NSClassFromString(@"IMChatHistoryController");
     id hc = hcClass ? [hcClass performSelector:@selector(sharedInstance)] : nil;
     if (hc && [hc respondsToSelector:@selector(loadedChatItemsForChat:beforeDate:limit:loadIfNeeded:)]) {
@@ -1968,23 +2020,42 @@ static NSDictionary *handleSendReaction(NSInteger requestId, NSDictionary *param
         verb = removed;
     }
     id parentMsg = nil;
+    id parentChatItem = loadParentFirstChatItem(selectedMessageGuid, &parentMsg);
     NSString *parentText = nil;
-    (void)deriveThreadIdentifier(selectedMessageGuid, &parentMsg);
     if (parentMsg && [parentMsg respondsToSelector:@selector(text)]) {
         id t = [parentMsg performSelector:@selector(text)];
         if ([t isKindOfClass:[NSAttributedString class]]) {
             parentText = [(NSAttributedString *)t string];
         }
     }
+    // BB-verified: derive `associatedMessageRange` from the parent's first
+    // chat item — `[item messagePartRange]`. Hardcoding `{0,1}` (what we did
+    // before) targets the wrong part on multipart parents (e.g. tapback on
+    // the second image of a photo grid). For non-text parts (attachments)
+    // BB substitutes "an attachment" for the quoted text.
+    NSRange targetRange = NSMakeRange(0, 1);
+    if (parentChatItem
+        && [parentChatItem respondsToSelector:@selector(messagePartRange)]) {
+        targetRange = [(IMMessagePartChatItem *)parentChatItem messagePartRange];
+        if (targetRange.length == 0) targetRange = NSMakeRange(0, 1);
+    }
     NSString *quoted = parentText.length
         ? [NSString stringWithFormat:@"%@“%@”", verb, parentText]
         : [verb stringByAppendingString:@"a message"];
     NSAttributedString *body = buildPlainAttributed(quoted, partIndex);
 
-    NSDictionary *summary = @{ @"amc": selectedMessageGuid,
+    // BB-verified `messageSummaryInfo` shape: `amc` is an integer count
+    // (always `@1` for single-target tapbacks), `ams` is the parent text
+    // (the receiver's notification preview reads `<verb> "<ams>"`). Earlier
+    // we were stuffing the parent guid into `amc` as a string — the
+    // resulting `message_summary_info` blob was malformed and on macOS 26
+    // imagent silently dropped the reaction.
+    NSDictionary *summary = @{ @"amc": @1,
                                @"ams": parentText ?: @"" };
-    debugLog(@"handleSendReaction: target=%@ type=%lld body=%@",
-             associatedRef, associatedType, quoted);
+    debugLog(@"handleSendReaction: target=%@ type=%lld range={%lu,%lu} body=%@",
+             associatedRef, associatedType,
+             (unsigned long)targetRange.location, (unsigned long)targetRange.length,
+             quoted);
 
     // One-shot probe: list every IMMessage class method that mentions
     // "associated" or "instant" so we can see what reaction constructors
@@ -2032,7 +2103,7 @@ static NSDictionary *handleSendReaction(NSInteger requestId, NSDictionary *param
         id imMessage = buildIMMessage(body, nil, nil, nil,
                                       associatedRef,
                                       associatedType,
-                                      NSMakeRange(0, 1),
+                                      targetRange,
                                       summary,
                                       @[], NO, NO);
         if (!imMessage) {
@@ -2069,28 +2140,21 @@ static NSDictionary *handleNotifyAnyways(NSInteger requestId, NSDictionary *para
     }
 
     @try {
-        SEL sel = @selector(sendMessageAcknowledgment:forChatItem:withMessageSummaryInfo:withGuid:);
+        // BB-verified macOS 12+ path: `markChatItemAsNotifyRecipient:` is
+        // the focus-bypass primitive ("Notify Anyway" UI affordance). Our
+        // previous `sendMessageAcknowledgment:forChatItem:withMessageSummaryInfo:withGuid:`
+        // with ack=1000 was actually a tapback ack, not a notify-anyway —
+        // wrong operation entirely.
+        SEL sel = @selector(markChatItemAsNotifyRecipient:);
         if (![chat respondsToSelector:sel]) {
-            return errorResponse(requestId, @"sendMessageAcknowledgment: not available");
+            return errorResponse(requestId, @"markChatItemAsNotifyRecipient: not available");
         }
         id item = findMessageItem(chat, messageGuid);
         if (!item) {
             return errorResponse(requestId,
                 [NSString stringWithFormat:@"Message not found: %@", messageGuid]);
         }
-        NSMethodSignature *sig = [chat methodSignatureForSelector:sel];
-        NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
-        [inv setSelector:sel];
-        [inv setTarget:chat];
-        NSInteger ack = 1000;
-        [inv setArgument:&ack atIndex:2];
-        __unsafe_unretained id ci = item;
-        [inv setArgument:&ci atIndex:3];
-        NSDictionary *empty = @{};
-        [inv setArgument:&empty atIndex:4];
-        __unsafe_unretained NSString *nilGuid = nil;
-        [inv setArgument:&nilGuid atIndex:5];
-        [inv invoke];
+        [chat performSelector:sel withObject:item];
         return successResponse(requestId, @{
             @"chatGuid": chatGuid, @"messageGuid": messageGuid, @"queued": @YES
         });
@@ -2372,17 +2436,14 @@ static NSDictionary *handleMarkChatUnread(NSInteger requestId, NSDictionary *par
     IMChat *chat = resolveChatByGuid(chatGuid);
     if (!chat) return errorResponse(requestId, @"Chat not found");
     @try {
-        if ([chat respondsToSelector:@selector(setUnreadCount:)]) {
-            SEL sel = @selector(setUnreadCount:);
-            NSMethodSignature *sig = [chat methodSignatureForSelector:sel];
-            NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
-            [inv setSelector:sel];
-            [inv setTarget:chat];
-            NSInteger unreadCount = 1;
-            [inv setArgument:&unreadCount atIndex:2];
-            [inv invoke];
+        // BB-verified macOS 11+ path: `markLastMessageAsUnread` is the
+        // daemon-aware selector that flips read=0 in chat.db AND triggers
+        // UI badge refresh. The `setUnreadCount:` we used previously only
+        // mutated a local KVO counter that didn't persist.
+        if ([chat respondsToSelector:@selector(markLastMessageAsUnread)]) {
+            [chat performSelector:@selector(markLastMessageAsUnread)];
         } else {
-            return errorResponse(requestId, @"setUnreadCount: not available");
+            return errorResponse(requestId, @"markLastMessageAsUnread not available");
         }
     } @catch (NSException *ex) { return errorResponse(requestId, ex.reason ?: @"failed"); }
     return successResponse(requestId, @{@"chatGuid": chatGuid, @"marked_as_unread": @YES});
@@ -2404,9 +2465,13 @@ static NSDictionary *handleAddParticipant(NSInteger requestId, NSDictionary *par
     if (!handle) return errorResponse(requestId, @"Could not vend handle");
 
     @try {
-        SEL sel = @selector(addParticipantsToiMessageChat:reason:);
+        // BB-verified macOS 11+ selector: `inviteParticipantsToiMessageChat:reason:`.
+        // `addParticipantsToiMessageChat:reason:` (what we used before) is not
+        // declared on IMChat; respondsToSelector returned NO and the call
+        // failed with "selector not available".
+        SEL sel = @selector(inviteParticipantsToiMessageChat:reason:);
         if (![chat respondsToSelector:sel]) {
-            return errorResponse(requestId, @"addParticipantsToiMessageChat:reason: not available");
+            return errorResponse(requestId, @"inviteParticipantsToiMessageChat:reason: not available");
         }
         NSMethodSignature *sig = [chat methodSignatureForSelector:sel];
         NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
@@ -2466,10 +2531,15 @@ static NSDictionary *handleSetDisplayName(NSInteger requestId, NSDictionary *par
     IMChat *chat = resolveChatByGuid(chatGuid);
     if (!chat) return errorResponse(requestId, @"Chat not found");
     @try {
-        if ([chat respondsToSelector:@selector(setDisplayName:)]) {
-            [chat performSelector:@selector(setDisplayName:) withObject:newName ?: @""];
+        // BB-verified: `_setDisplayName:` (underscore-prefixed) is the
+        // private mutator that posts the IDS update so other chat members
+        // see the rename. The public `setDisplayName:` we used before was
+        // just the KVO setter — it changed the local property without
+        // propagating, so renames were sender-only.
+        if ([chat respondsToSelector:@selector(_setDisplayName:)]) {
+            [chat performSelector:@selector(_setDisplayName:) withObject:newName ?: @""];
         } else {
-            return errorResponse(requestId, @"setDisplayName: not available");
+            return errorResponse(requestId, @"_setDisplayName: not available");
         }
     } @catch (NSException *ex) { return errorResponse(requestId, ex.reason ?: @"failed"); }
     return successResponse(requestId, @{@"chatGuid": chatGuid, @"name": newName ?: @""});
@@ -2482,26 +2552,36 @@ static NSDictionary *handleUpdateGroupPhoto(NSInteger requestId, NSDictionary *p
     IMChat *chat = resolveChatByGuid(chatGuid);
     if (!chat) return errorResponse(requestId, @"Chat not found");
 
-    NSData *photoData = nil;
-    if (filePath.length) {
-        photoData = [NSData dataWithContentsOfFile:filePath];
-        if (!photoData) {
-            return errorResponse(requestId,
-                [NSString stringWithFormat:@"Could not read photo: %@", filePath]);
-        }
-    }
     @try {
-        SEL sel = @selector(setGroupPhotoData:);
+        // BB-verified: group-photo updates go through the file-transfer
+        // pipeline, not raw bytes. Stage the photo via prepareOutgoingTransfer
+        // (so it lives in IMD's attachments tree), then call
+        // sendGroupPhotoUpdate: with the transfer guid. Passing nil/empty
+        // file path clears the photo.
+        SEL sel = @selector(sendGroupPhotoUpdate:);
         if (![chat respondsToSelector:sel]) {
-            return errorResponse(requestId, @"setGroupPhotoData: not available");
+            return errorResponse(requestId, @"sendGroupPhotoUpdate: not available");
         }
-        [chat performSelector:sel withObject:photoData];
+        if (filePath.length == 0) {
+            [chat performSelector:sel withObject:nil];
+            return successResponse(requestId,
+                @{@"chatGuid": chatGuid, @"cleared": @YES, @"size": @0});
+        }
+        NSURL *fileURL = [NSURL fileURLWithPath:filePath];
+        NSString *prepErr = nil;
+        IMFileTransfer *transfer = prepareOutgoingTransfer(fileURL,
+            [fileURL lastPathComponent], &prepErr);
+        if (!transfer || ![transfer guid].length) {
+            return errorResponse(requestId,
+                prepErr.length ? prepErr : @"Could not prepare group-photo transfer");
+        }
+        [chat performSelector:sel withObject:[transfer guid]];
+        return successResponse(requestId, @{
+            @"chatGuid": chatGuid,
+            @"cleared": @NO,
+            @"transferGuid": [transfer guid]
+        });
     } @catch (NSException *ex) { return errorResponse(requestId, ex.reason ?: @"failed"); }
-    return successResponse(requestId, @{
-        @"chatGuid": chatGuid,
-        @"cleared": @(filePath.length == 0),
-        @"size": @(photoData.length)
-    });
 }
 
 static NSDictionary *handleLeaveChat(NSInteger requestId, NSDictionary *params) {
@@ -2578,8 +2658,8 @@ static NSDictionary *handleCreateChat(NSInteger requestId, NSDictionary *params)
     }
     if (!chat) return errorResponse(requestId, @"Registry could not produce chat");
 
-    if (displayName.length && [chat respondsToSelector:@selector(setDisplayName:)]) {
-        @try { [chat performSelector:@selector(setDisplayName:) withObject:displayName]; }
+    if (displayName.length && [chat respondsToSelector:@selector(_setDisplayName:)]) {
+        @try { [chat performSelector:@selector(_setDisplayName:) withObject:displayName]; }
         @catch (__unused NSException *ex) {}
     }
 
