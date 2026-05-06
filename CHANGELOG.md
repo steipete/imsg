@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Private API Bridge
+- fix: restore macOS 26 bridge sends, replies, tapbacks, typing/read RPC, and
+  chat/group lifecycle RPC methods after the BlueBubbles-inspired bridge port
+  regressed on Tahoe (#101, thanks @omarshahine).
+
 ## 0.7.2 - 2026-05-06
 
 ### Release Packaging
