@@ -14,6 +14,22 @@ protocol RPCOutput: Sendable {
   func sendNotification(method: String, params: Any)
 }
 
+/// Methods exposed by `imsg rpc` over JSON-RPC. Advertised to clients via
+/// `imsg status --json` (`rpc_methods` field) so capability-aware consumers
+/// (like the openclaw imessage channel plugin) can gate features off when
+/// running against an older imsg build that doesn't implement a given method.
+///
+/// Keep in sync with the dispatch switch in `RPCServer.handleLine`.
+let kSupportedRPCMethods: [String] = [
+  "chats.list",
+  "messages.history",
+  "watch.subscribe",
+  "watch.unsubscribe",
+  "send",
+  "typing",
+  "read",
+]
+
 final class RPCServer {
   let store: MessageStore
   let watcher: MessageWatcher

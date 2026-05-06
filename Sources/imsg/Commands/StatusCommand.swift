@@ -60,7 +60,8 @@ enum StatusCommand {
         message: availability.message,
         bridgeVersion: bridgeVersion,
         v2Ready: v2Ready,
-        selectors: selectors
+        selectors: selectors,
+        rpcMethods: kSupportedRPCMethods
       )
       try JSONLines.print(payload)
     } else {
@@ -137,6 +138,7 @@ private struct StatusPayload: Encodable {
   let bridgeVersion: Int
   let v2Ready: Bool
   let selectors: [String: Bool]
+  let rpcMethods: [String]
 
   enum CodingKeys: String, CodingKey {
     case basicFeatures = "basic_features"
@@ -148,5 +150,6 @@ private struct StatusPayload: Encodable {
     case bridgeVersion = "bridge_version"
     case v2Ready = "v2_ready"
     case selectors
+    case rpcMethods = "rpc_methods"
   }
 }
