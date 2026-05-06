@@ -9,8 +9,11 @@ enum ChatCreateCommand {
     name: "chat-create",
     abstract: "Create a new chat (1:1 or group)",
     discussion: """
-      Vends handles for each address and asks IMChatRegistry to materialize
-      a chat. Optionally sets a display name and sends an initial message.
+      Requires `imsg launch` (SIP-disabled, dylib injected). Vends handles for
+      each address through Messages' private IMCore API and asks IMChatRegistry
+      to materialize a chat. Optionally sets a display name and sends an
+      initial message. Chat creation is currently iMessage-only; use
+      `imsg send --service sms` for SMS sends.
       """,
     signature: CommandSignatures.withRuntimeFlags(
       CommandSignature(

@@ -227,9 +227,9 @@ default because immutable reads can miss WAL-backed Messages updates.
 Default `send`, `chats`, `history`, `watch`, and read-only `rpc` workflows do
 not require IMCore injection.
 
-Advanced features such as `read`, `typing`, `launch`, and IMCore bridge status are
-opt-in. They require SIP to be disabled and a helper dylib to be injected into
-Messages.app:
+Advanced features such as `read`, `typing`, `launch`, bridge-backed rich send,
+message mutation, and chat management are opt-in. They require SIP to be
+disabled and a helper dylib to be injected into Messages.app:
 
 ```bash
 make build-dylib
@@ -254,9 +254,10 @@ To revert after testing advanced features, re-enable SIP from Recovery mode with
 
 The bridge implements a manual port of the BlueBubbles private-API surface
 inspired by their Apache-2.0 helper, into our own dylib (no third-party
-binary). All commands take a `--chat` argument that is the chat guid
-(e.g. `iMessage;-;+15551234567` or `iMessage;+;chat0000` for groups).
-Get a chat guid via `imsg chats --json`.
+binary). Commands in this section require `imsg launch` first, which means
+SIP-disabled DYLD injection into Messages.app. Most commands take a `--chat`
+argument that is the chat guid (e.g. `iMessage;-;+15551234567` or
+`iMessage;+;chat0000` for groups). Get a chat guid via `imsg chats --json`.
 
 Messaging:
 ```bash
