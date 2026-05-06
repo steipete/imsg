@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- feat: port the BlueBubbles-inspired private-API bridge surface for rich sends,
+  message mutation, chat management, account/nickname introspection, and v2
+  concurrent bridge IPC (#100, thanks @omarshahine).
+
 ## 0.6.0 - 2026-05-05
 
 ### More Reliable Live Streams And History
