@@ -956,10 +956,19 @@ static id constructIMMessageViaItem(NSAttributedString *attributedText,
     NSArray *transferGuids = fileTransferGuids ?: @[];
     NSError *err = nil;
     NSString *guid = [[NSUUID UUID] UUIDString];
-    // 0x5 = IMMessageItemFlagsFromMe | IMMessageItemFlagsFinished. Audio
-    // messages historically use 0x300005; subject-bearing messages 0x10000d.
-    // Items with `flags = 0` are dropped before reaching chat.db on macOS 26.
-    unsigned long long flags = isAudioMessage ? 0x300005ULL : 0x5ULL;
+    // BlueBubblesHelper-verified flag set: 0x100005 (FromMe | Finished |
+    // 0x100000 finalize bit) for normal text+attachment, 0x10000d when a
+    // subject is set, 0x300005 for audio messages. The earlier `0x5`
+    // variant was the cause of malformed attachments on the receiver — the
+    // 0x100000 bit is what tells imagent to finalize the payload.
+    unsigned long long flags;
+    if (isAudioMessage) {
+        flags = 0x300005ULL;
+    } else if (subject.length) {
+        flags = 0x10000dULL;
+    } else {
+        flags = 0x100005ULL;
+    }
     id sender = nil;
     NSDictionary *attributes = nil;
 
@@ -1173,13 +1182,9 @@ static id buildIMMessage(NSAttributedString *body,
                          NSArray *fileTransferGuids,
                          BOOL isAudioMessage,
                          BOOL ddScan) {
-    // Reactions (associatedMessageGuid + type > 0) need the associated
-    // fields set atomically in the initializer — IMMessageItem's 9-arg init
-    // doesn't accept them, and post-init setters don't survive the wrap on
-    // macOS 26. Skip the IMMessageItem-first path for reactions and use the
-    // long initIMMessageWith…:associatedMessageGUID: form below, which is
-    // what's worked historically for tapbacks (chat.db row 5078 in the
-    // dev-machine smoke test was sent via this path).
+    // Reactions take a different code path entirely (macOS 26 init below) —
+    // the IMMessageItem-first construction can't carry associated-message
+    // fields atomically, and post-init setters don't survive the wrap.
     BOOL isReaction = associatedMessageGuid.length && associatedMessageType > 0;
     if (!isReaction) {
         id viaItem = constructIMMessageViaItem(body, subject, effectId,
@@ -1199,7 +1204,46 @@ static id buildIMMessage(NSAttributedString *body,
 
     // Reaction / reply path: associatedMessageGuid + associatedMessageType.
     if (associatedMessageGuid.length && associatedMessageType > 0) {
+        // macOS 26 path (BlueBubblesHelper-verified, 13 args, no
+        // balloonBundleID/payloadData/expressiveSendStyleID). BB allocates
+        // and inits in two steps: `[[IMMessage alloc] init]` then call this
+        // longer initializer on the result.
+        SEL macos26Sel = @selector(initWithSender:time:text:messageSubject:fileTransferGUIDs:flags:error:guid:subject:associatedMessageGUID:associatedMessageType:associatedMessageRange:messageSummaryInfo:);
+        if ([messageClass instancesRespondToSelector:macos26Sel]) {
+            unsigned long long flags = 0x5;
+            id msg = [[messageClass alloc] init];
+            NSMethodSignature *sig =
+                [messageClass instanceMethodSignatureForSelector:macos26Sel];
+            NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
+            [inv setSelector:macos26Sel];
+            [inv setTarget:msg];
+            id nilObj = nil;
+            NSDate *now = [NSDate date];
+            [inv setArgument:&nilObj atIndex:2];           // sender
+            [inv setArgument:&now atIndex:3];              // time
+            [inv setArgument:&body atIndex:4];             // text
+            [inv setArgument:&subject atIndex:5];          // messageSubject
+            [inv setArgument:&fileTransferGuids atIndex:6];
+            [inv setArgument:&flags atIndex:7];
+            [inv setArgument:&nilObj atIndex:8];           // error
+            [inv setArgument:&nilObj atIndex:9];           // guid
+            [inv setArgument:&nilObj atIndex:10];          // subject (string)
+            [inv setArgument:&associatedMessageGuid atIndex:11];
+            [inv setArgument:&associatedMessageType atIndex:12];
+            [inv setArgument:&associatedMessageRange atIndex:13];
+            [inv setArgument:&summaryInfo atIndex:14];
+            [inv retainArguments];
+            id result = invokeReturningObject(inv);
+            debugLog(@"buildIMMessage: reaction via macos26Sel result=%@",
+                     result ? NSStringFromClass([result class]) : @"(nil)");
+            if (result) return result;
+        }
+
+        // Legacy 17-arg form for older macOS.
         SEL sel = @selector(initIMMessageWithSender:time:text:messageSubject:fileTransferGUIDs:flags:error:guid:subject:balloonBundleID:payloadData:expressiveSendStyleID:associatedMessageGUID:associatedMessageType:associatedMessageRange:messageSummaryInfo:);
+        BOOL responds = [messageClass instancesRespondToSelector:sel];
+        debugLog(@"buildIMMessage: reaction path; long-init responds=%d type=%lld guid=%@",
+                 responds, associatedMessageType, associatedMessageGuid);
         id msg = [messageClass alloc];
         if ([msg respondsToSelector:sel]) {
             unsigned long long flags = 0x5;
@@ -1232,7 +1276,51 @@ static id buildIMMessage(NSAttributedString *body,
         }
     }
 
-    // Normal send / reply path.
+    // Normal send / reply path. Try the BB-verified macOS 26 selector
+    // (`initWithSender:…:expressiveSendStyleID:`, 12 args, no `IMMessage`
+    // prefix) first; fall back to the legacy `initIMMessageWithSender:` for
+    // older releases.
+    SEL bbSendSel = @selector(initWithSender:time:text:messageSubject:fileTransferGUIDs:flags:error:guid:subject:balloonBundleID:payloadData:expressiveSendStyleID:);
+    if ([messageClass instancesRespondToSelector:bbSendSel]) {
+        unsigned long long flags;
+        if (isAudioMessage) {
+            flags = 0x300005ULL;
+        } else if (subject.length) {
+            flags = 0x10000dULL;
+        } else {
+            flags = 0x100005ULL;
+        }
+        id m = [[messageClass alloc] init];
+        NSMethodSignature *sig = [messageClass instanceMethodSignatureForSelector:bbSendSel];
+        NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
+        [inv setSelector:bbSendSel];
+        [inv setTarget:m];
+        id nilObj = nil;
+        NSDate *now = [NSDate date];
+        [inv setArgument:&nilObj atIndex:2];           // sender
+        [inv setArgument:&now atIndex:3];              // time
+        [inv setArgument:&body atIndex:4];             // text
+        [inv setArgument:&subject atIndex:5];          // messageSubject
+        [inv setArgument:&fileTransferGuids atIndex:6];
+        [inv setArgument:&flags atIndex:7];
+        [inv setArgument:&nilObj atIndex:8];           // error
+        [inv setArgument:&nilObj atIndex:9];           // guid
+        [inv setArgument:&nilObj atIndex:10];          // subject string
+        [inv setArgument:&nilObj atIndex:11];          // balloonBundleID
+        [inv setArgument:&nilObj atIndex:12];          // payloadData
+        [inv setArgument:&effectId atIndex:13];        // expressiveSendStyleID
+        [inv retainArguments];
+        id result = invokeReturningObject(inv);
+        if (result) {
+            if (threadIdentifier
+                && [result respondsToSelector:@selector(setThreadIdentifier:)]) {
+                [result performSelector:@selector(setThreadIdentifier:)
+                             withObject:threadIdentifier];
+            }
+            return result;
+        }
+    }
+
     SEL sel = @selector(initIMMessageWithSender:time:text:messageSubject:fileTransferGUIDs:flags:error:guid:subject:balloonBundleID:payloadData:expressiveSendStyleID:);
     id msg = [messageClass alloc];
     if ([msg respondsToSelector:sel]) {
@@ -1834,40 +1922,100 @@ static NSDictionary *handleSendReaction(NSInteger requestId, NSDictionary *param
             [NSString stringWithFormat:@"Unknown reactionType: %@", reactionType]);
     }
 
-    // Reactions need the `p:<part>/<parent-guid>` prefix — iMessage's
-    // canonical part-targeted reference for tapbacks. The receiver
-    // pipeline ignores reaction messages whose associatedMessageGUID is a
-    // bare guid (no part prefix).
+    // BlueBubblesHelper-verified format for tapbacks:
+    // associatedMessageGUID = `p:<partIndex>/<parent-guid>`. Without the
+    // prefix the receiver doesn't render the heart on the parent message.
     NSString *associatedRef = [selectedMessageGuid hasPrefix:@"p:"]
         ? selectedMessageGuid
         : [NSString stringWithFormat:@"p:%ld/%@",
                                      (long)partIndex, selectedMessageGuid];
-    debugLog(@"handleSendReaction: target=%@ type=%lld", associatedRef, associatedType);
 
-    // Build via the long initIMMessageWith…:associatedMessageGUID: path —
-    // buildIMMessage skips its IMMessageItem-first short-circuit when an
-    // associated message is set, so this routes through the legacy
-    // initializer which accepts all reaction fields atomically.
-    NSAttributedString *body = buildPlainAttributed(@"", partIndex);
-    NSDictionary *summary = @{ @"amc": selectedMessageGuid, @"ams": @"" };
+    // Reaction body needs the verb-style summary text — `Loved "parent
+    // text"` — not an empty string. imagent silently drops reactions with
+    // empty body. Best-effort: load the parent and quote its text; fall
+    // back to a generic phrase if we can't resolve it.
+    NSString *verb = @"Loved ";
+    switch (associatedType) {
+        case 2000: case 3000: verb = @"Loved "; break;
+        case 2001: case 3001: verb = @"Liked "; break;
+        case 2002: case 3002: verb = @"Disliked "; break;
+        case 2003: case 3003: verb = @"Laughed at "; break;
+        case 2004: case 3004: verb = @"Emphasized "; break;
+        case 2005: case 3005: verb = @"Questioned "; break;
+    }
+    if (associatedType >= 3000) {
+        NSString *removed = @"Removed a like from ";
+        switch (associatedType) {
+            case 3000: removed = @"Removed a heart from "; break;
+            case 3001: removed = @"Removed a like from "; break;
+            case 3002: removed = @"Removed a dislike from "; break;
+            case 3003: removed = @"Removed a laugh from "; break;
+            case 3004: removed = @"Removed an exclamation from "; break;
+            case 3005: removed = @"Removed a question mark from "; break;
+        }
+        verb = removed;
+    }
+    id parentMsg = nil;
+    NSString *parentText = nil;
+    (void)deriveThreadIdentifier(selectedMessageGuid, &parentMsg);
+    if (parentMsg && [parentMsg respondsToSelector:@selector(text)]) {
+        id t = [parentMsg performSelector:@selector(text)];
+        if ([t isKindOfClass:[NSAttributedString class]]) {
+            parentText = [(NSAttributedString *)t string];
+        }
+    }
+    NSString *quoted = parentText.length
+        ? [NSString stringWithFormat:@"%@“%@”", verb, parentText]
+        : [verb stringByAppendingString:@"a message"];
+    NSAttributedString *body = buildPlainAttributed(quoted, partIndex);
+
+    NSDictionary *summary = @{ @"amc": selectedMessageGuid,
+                               @"ams": parentText ?: @"" };
+    debugLog(@"handleSendReaction: target=%@ type=%lld body=%@",
+             associatedRef, associatedType, quoted);
+
+    // One-shot probe: list every IMMessage class method that mentions
+    // "associated" or "instant" so we can see what reaction constructors
+    // macOS 26 actually exposes. This is intentionally noisy — gates itself
+    // off after the first call.
+    static dispatch_once_t probeOnce;
+    dispatch_once(&probeOnce, ^{
+        Class c = NSClassFromString(@"IMMessage");
+        unsigned int n = 0;
+        Method *m = class_copyMethodList(object_getClass(c), &n);
+        for (unsigned int i = 0; i < n; i++) {
+            const char *name = sel_getName(method_getName(m[i]));
+            if (strstr(name, "ssociated") || strstr(name, "nstantMessage")
+                || strstr(name, "eaction") || strstr(name, "knowledgment")) {
+                debugLog(@"  +[IMMessage %s]", name);
+            }
+        }
+        if (m) free(m);
+
+        Class ic = NSClassFromString(@"IMMessageItem");
+        n = 0;
+        Method *im = class_copyMethodList(ic, &n);
+        for (unsigned int i = 0; i < n; i++) {
+            const char *name = sel_getName(method_getName(im[i]));
+            if (strstr(name, "ssociated") || strstr(name, "ummary")
+                || strstr(name, "ssociatedMessage")) {
+                debugLog(@"  -[IMMessageItem %s]", name);
+            }
+        }
+        if (im) free(im);
+    });
     @try {
-        id imMessage = buildIMMessage(body, /*subject*/ nil, /*effect*/ nil,
-                                      /*threadIdentifier*/ nil,
+        id imMessage = buildIMMessage(body, nil, nil, nil,
                                       associatedRef,
                                       associatedType,
                                       NSMakeRange(0, 1),
                                       summary,
-                                      /*fileTransferGuids*/ @[],
-                                      /*isAudio*/ NO,
-                                      /*ddScan*/ NO);
+                                      @[], NO, NO);
         if (!imMessage) {
             return errorResponse(requestId, @"Could not build reaction IMMessage");
         }
-        // Use the simpler public sendMessage: for reactions — adjustingSender
-        // appears to interfere with the reaction-message path on macOS 26
-        // even when the public path works.
         [chat performSelector:@selector(sendMessage:) withObject:imMessage];
-        debugLog(@"handleSendReaction: dispatched via sendMessage:");
+        debugLog(@"handleSendReaction: dispatched");
         NSString *guid = lastSentMessageGuid(chat);
         return successResponse(requestId, @{
             @"chatGuid": chatGuid,
