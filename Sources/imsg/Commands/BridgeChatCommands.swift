@@ -21,7 +21,7 @@ enum ChatCreateCommand {
           .make(label: "name", names: [.long("name")], help: "group display name"),
           .make(label: "text", names: [.long("text")], help: "initial message body"),
           .make(
-            label: "service", names: [.long("service")], help: "iMessage|SMS (default iMessage)"),
+            label: "service", names: [.long("service")], help: "iMessage (default)"),
         ]
       )
     ),
@@ -42,9 +42,14 @@ enum ChatCreateCommand {
     .filter { !$0.isEmpty }
     guard !addresses.isEmpty else { throw ParsedValuesError.invalidOption("addresses") }
 
+    let service = values.option("service") ?? "iMessage"
+    guard service.caseInsensitiveCompare("iMessage") == .orderedSame else {
+      throw IMsgError.unsupportedService(service)
+    }
+
     var params: [String: Any] = [
       "addresses": addresses,
-      "service": values.option("service") ?? "iMessage",
+      "service": "iMessage",
     ]
     if let text = values.option("text"), !text.isEmpty { params["message"] = text }
     if let name = values.option("name"), !name.isEmpty { params["displayName"] = name }

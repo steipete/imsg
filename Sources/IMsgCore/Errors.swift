@@ -1,9 +1,10 @@
 import Foundation
 
-public enum IMsgError: LocalizedError, Sendable {
+public enum IMsgError: LocalizedError, CustomStringConvertible, Sendable {
   case permissionDenied(path: String, underlying: Error)
   case invalidISODate(String)
   case invalidService(String)
+  case unsupportedService(String)
   case invalidChatTarget(String)
   case appleScriptFailure(String)
   case typingIndicatorFailed(String)
@@ -35,6 +36,8 @@ public enum IMsgError: LocalizedError, Sendable {
       return "Invalid ISO8601 date: \(value)"
     case .invalidService(let value):
       return "Invalid service: \(value)"
+    case .unsupportedService(let value):
+      return "Unsupported service: \(value)"
     case .invalidChatTarget(let value):
       return "Invalid chat target: \(value)"
     case .appleScriptFailure(let message):
@@ -52,5 +55,9 @@ public enum IMsgError: LocalizedError, Sendable {
     case .chatNotFound(let chatID):
       return "Chat not found: \(chatID)"
     }
+  }
+
+  public var description: String {
+    errorDescription ?? "Unknown imsg error"
   }
 }

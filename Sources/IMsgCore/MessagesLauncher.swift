@@ -68,9 +68,14 @@ public final class MessagesLauncher: @unchecked Sendable {
     }
   }
 
+  /// Check if Messages.app has published the bridge-ready lock file.
+  public func hasReadyLockFile() -> Bool {
+    FileManager.default.fileExists(atPath: lockFile)
+  }
+
   /// Check if Messages.app is running with our dylib (lock file exists and responds to ping).
   public func isInjectedAndReady() -> Bool {
-    guard FileManager.default.fileExists(atPath: lockFile) else {
+    guard hasReadyLockFile() else {
       return false
     }
     do {
@@ -84,7 +89,16 @@ public final class MessagesLauncher: @unchecked Sendable {
   /// Ensure Messages.app is running with our dylib injected.
   public func ensureRunning() throws {
     if isInjectedAndReady() { return }
+    try launchInjectedMessages()
+  }
 
+  /// Ensure Messages.app is launched with the helper without touching legacy IPC.
+  public func ensureLaunched() throws {
+    if hasReadyLockFile() { return }
+    try launchInjectedMessages()
+  }
+
+  private func launchInjectedMessages() throws {
     switch Self.currentSIPStatus() {
     case .disabled:
       break

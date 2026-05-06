@@ -28,29 +28,27 @@ public final class IMsgBridgeClient: @unchecked Sendable {
     }
   }
 
-  /// Whether the dylib is currently injected and answering pings.
+  /// Whether the dylib is currently injected and has published its ready lock.
   public func isReady() -> Bool {
-    launcher.isInjectedAndReady()
+    launcher.hasReadyLockFile()
   }
 
   // MARK: - High-level API
 
   /// Invoke a v2 bridge action and return its `data` payload on success.
-  ///
-  /// On legacy actions (`typing`, `read`, `list_chats`, `status`, `ping`) this
-  /// falls back to the single-file IPC the existing dylib already understands,
-  /// preserving backwards compatibility with un-rebuilt dylibs.
+  /// Legacy single-file IPC is only used when explicitly requested through
+  /// `IMSG_BRIDGE_LEGACY_IPC=1`.
   public func invoke(
     action: BridgeAction,
     params: [String: Any] = [:],
     timeout: TimeInterval = IMsgBridgeProtocol.defaultResponseTimeout
   ) async throws -> [String: Any] {
-    try launcher.ensureRunning()
-
-    if useLegacyIPC || isLegacyAction(action) {
+    if useLegacyIPC {
+      try launcher.ensureRunning()
       return try await invokeLegacy(action: action, params: params)
     }
 
+    try launcher.ensureLaunched()
     return try await invokeV2(action: action, params: params, timeout: timeout)
   }
 
@@ -110,15 +108,6 @@ public final class IMsgBridgeClient: @unchecked Sendable {
   }
 
   // MARK: - Legacy path
-
-  private func isLegacyAction(_ action: BridgeAction) -> Bool {
-    switch action {
-    case .ping, .status, .listChats, .typing, .read:
-      return true
-    default:
-      return false
-    }
-  }
 
   private func invokeLegacy(
     action: BridgeAction,

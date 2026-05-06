@@ -1,4 +1,6 @@
+import Commander
 import Foundation
+import IMsgCore
 import Testing
 
 @testable import imsg
@@ -50,4 +52,31 @@ func chatMarkRejectsConflictingFlags() async {
   }
   #expect(status == 1)
   #expect(output.contains("Invalid value for option: --read"))
+}
+
+@Test
+func chatCreateRejectsUnsupportedServiceBeforeBridgeLaunch() async {
+  let values = ParsedValues(
+    positional: [],
+    options: [
+      "addresses": ["+15551234567"],
+      "service": ["SMS"],
+    ],
+    flags: []
+  )
+  let runtime = RuntimeOptions(parsedValues: values)
+
+  do {
+    try await ChatCreateCommand.run(values: values, runtime: runtime)
+    #expect(Bool(false))
+  } catch let error as IMsgError {
+    switch error {
+    case .unsupportedService(let value):
+      #expect(value == "SMS")
+    default:
+      #expect(Bool(false))
+    }
+  } catch {
+    #expect(Bool(false))
+  }
 }

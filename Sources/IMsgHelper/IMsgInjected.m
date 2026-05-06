@@ -1690,6 +1690,11 @@ static NSDictionary *handleCreateChat(NSInteger requestId, NSDictionary *params)
     if (![addresses isKindOfClass:[NSArray class]] || addresses.count == 0) {
         return errorResponse(requestId, @"Missing addresses array");
     }
+    if ([service caseInsensitiveCompare:@"iMessage"] != NSOrderedSame) {
+        return errorResponse(requestId, [NSString stringWithFormat:
+            @"Unsupported chat-create service: %@", service]);
+    }
+    service = @"iMessage";
 
     Class hrClass = NSClassFromString(@"IMHandleRegistrar");
     id hr = hrClass ? [hrClass performSelector:@selector(sharedInstance)] : nil;

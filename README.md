@@ -308,6 +308,8 @@ imsg chat-leave --chat ...
 imsg chat-delete --chat ...
 imsg chat-mark --chat ... --read     # or --unread
 ```
+`chat-create` currently creates iMessage chats only. SMS sending remains
+available through `imsg send --service sms`.
 
 Introspection:
 ```bash

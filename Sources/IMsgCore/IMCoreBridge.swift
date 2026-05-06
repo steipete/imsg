@@ -55,23 +55,23 @@ public final class IMCoreBridge: @unchecked Sendable {
       "handle": handle,
       "typing": typing,
     ]
-    _ = try await sendCommand(action: "typing", params: params)
+    _ = try await invokeBridge(action: .typing, params: params)
   }
 
   /// Mark all messages as read in a conversation.
   public func markAsRead(handle: String) async throws {
-    _ = try await sendCommand(action: "read", params: ["handle": handle])
+    _ = try await invokeBridge(action: .read, params: ["handle": handle])
   }
 
   /// List all available chats (for debugging).
   public func listChats() async throws -> [[String: Any]] {
-    let response = try await sendCommand(action: "list_chats", params: [:])
+    let response = try await invokeBridge(action: .listChats, params: [:])
     return response["chats"] as? [[String: Any]] ?? []
   }
 
   /// Get detailed status from the injected helper.
   public func getStatus() async throws -> [String: Any] {
-    return try await sendCommand(action: "status", params: [:])
+    return try await invokeBridge(action: .status, params: [:])
   }
 
   /// Check availability and return a diagnostic message.
@@ -131,7 +131,7 @@ public final class IMCoreBridge: @unchecked Sendable {
       break
     }
 
-    if launcher.isInjectedAndReady() {
+    if launcher.hasReadyLockFile() {
       return (true, "Connected to Messages.app. IMCore features available.")
     }
 
@@ -150,22 +150,22 @@ public final class IMCoreBridge: @unchecked Sendable {
 
   // MARK: - Private
 
-  private func sendCommand(
-    action: String, params: [String: Any]
+  private func invokeBridge(
+    action: BridgeAction, params: [String: Any]
   ) async throws -> [String: Any] {
     do {
-      let response = try await launcher.sendCommand(action: action, params: params)
-
-      if response["success"] as? Bool == true {
-        return response
+      return try await IMsgBridgeClient.shared.invoke(action: action, params: params)
+    } catch let error as IMsgBridgeError {
+      switch error {
+      case .dylibReturnedError(let message):
+        if message.contains("Chat not found") {
+          let handle = params["handle"] as? String ?? "unknown"
+          throw IMCoreBridgeError.chatNotFound(handle)
+        }
+        throw IMCoreBridgeError.operationFailed(message)
+      default:
+        throw IMCoreBridgeError.connectionFailed(error.description)
       }
-
-      let error = response["error"] as? String ?? "Unknown error"
-      if error.contains("Chat not found") {
-        let handle = params["handle"] as? String ?? "unknown"
-        throw IMCoreBridgeError.chatNotFound(handle)
-      }
-      throw IMCoreBridgeError.operationFailed(error)
     } catch let error as MessagesLauncherError {
       throw IMCoreBridgeError.connectionFailed(error.description)
     }

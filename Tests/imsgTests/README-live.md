@@ -77,6 +77,7 @@ imsg chat-photo --chat "$GROUP" --file ~/Pictures/test.jpg
 imsg chat-remove-member --chat "$GROUP" --address +15553333333
 imsg chat-leave --chat "$GROUP"
 ```
+`chat-create` is iMessage-only; use `imsg send --service sms` for SMS sends.
 
 Expect: each step is visible in Messages.app within a second or two.
 
