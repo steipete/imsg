@@ -2,6 +2,43 @@ import Commander
 import Foundation
 import IMsgCore
 
+/// Expand short expressive-send names (e.g. `invisibleink`, `confetti`) to the
+/// full bundle identifiers Messages.app expects on `expressiveSendStyleID`.
+/// Already-prefixed strings (anything starting with `com.apple.`) and unknown
+/// names pass through untouched so the dylib can return its own error.
+enum ExpressiveSendEffect {
+  /// Bubble effects render on the message bubble itself.
+  static let bubbleNames: Set<String> = ["impact", "loud", "gentle", "invisibleink"]
+
+  /// Screen effects play a full-screen animation. Map the short name to the
+  /// `CK<TitleCase>Effect` token used in the bundle id.
+  static let screenNames: [String: String] = [
+    "confetti": "Confetti",
+    "lasers": "Lasers",
+    "fireworks": "Fireworks",
+    "balloons": "Balloons",
+    "sparkles": "Sparkles",
+    "spotlight": "Spotlight",
+    "echo": "Echo",
+    "love": "Love",
+    "celebration": "Celebration",
+  ]
+
+  static func expand(_ raw: String) -> String {
+    let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    if trimmed.isEmpty { return raw }
+    if trimmed.hasPrefix("com.apple.") { return trimmed }
+    let key = trimmed.lowercased()
+    if bubbleNames.contains(key) {
+      return "com.apple.MobileSMS.expressivesend.\(key)"
+    }
+    if let token = screenNames[key] {
+      return "com.apple.messages.effect.CK\(token)Effect"
+    }
+    return trimmed
+  }
+}
+
 /// Helpers shared by all bridge-backed commands.
 enum BridgeOutput {
   struct EmittedError: Error {}
@@ -81,7 +118,8 @@ enum SendRichCommand {
     ),
     usageExamples: [
       "imsg send-rich --chat 'iMessage;-;+15551234567' --text 'hi'",
-      "imsg send-rich --chat 'iMessage;-;+15551234567' --text 'BOOM' --effect com.apple.MobileSMS.expressivesend.impact",
+      "imsg send-rich --chat 'iMessage;-;+15551234567' --text 'BOOM' --effect impact",
+      "imsg send-rich --chat 'iMessage;-;+15551234567' --text 'pew pew' --effect lasers",
       "imsg send-rich --chat ... --text 'hello world' --format '[{\"start\":0,\"length\":5,\"styles\":[\"bold\"]}]'",
     ]
   ) { values, runtime in
@@ -99,7 +137,9 @@ enum SendRichCommand {
       "partIndex": Int(values.option("part") ?? "0") ?? 0,
       "ddScan": !values.flag("noDDScan"),
     ]
-    if let effect = values.option("effect"), !effect.isEmpty { params["effectId"] = effect }
+    if let effect = values.option("effect"), !effect.isEmpty {
+      params["effectId"] = ExpressiveSendEffect.expand(effect)
+    }
     if let subject = values.option("subject"), !subject.isEmpty { params["subject"] = subject }
     if let reply = values.option("replyTo"), !reply.isEmpty {
       params["selectedMessageGuid"] = reply
@@ -185,7 +225,9 @@ enum SendMultipartCommand {
       throw ParsedValuesError.invalidOption("parts")
     }
     var params: [String: Any] = ["chatGuid": chat, "parts": parts]
-    if let effect = values.option("effect"), !effect.isEmpty { params["effectId"] = effect }
+    if let effect = values.option("effect"), !effect.isEmpty {
+      params["effectId"] = ExpressiveSendEffect.expand(effect)
+    }
     if let subject = values.option("subject"), !subject.isEmpty { params["subject"] = subject }
 
     _ = try await BridgeOutput.invokeAndEmit(

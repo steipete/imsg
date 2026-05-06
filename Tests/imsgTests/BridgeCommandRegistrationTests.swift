@@ -55,6 +55,48 @@ func chatMarkRejectsConflictingFlags() async {
 }
 
 @Test
+func expressiveSendEffectExpandsShortNames() {
+  // Bubble effects map to MobileSMS.expressivesend.<name>.
+  #expect(
+    ExpressiveSendEffect.expand("invisibleink")
+      == "com.apple.MobileSMS.expressivesend.invisibleink")
+  #expect(
+    ExpressiveSendEffect.expand("impact")
+      == "com.apple.MobileSMS.expressivesend.impact")
+  #expect(
+    ExpressiveSendEffect.expand("loud")
+      == "com.apple.MobileSMS.expressivesend.loud")
+  #expect(
+    ExpressiveSendEffect.expand("gentle")
+      == "com.apple.MobileSMS.expressivesend.gentle")
+
+  // Screen effects map to messages.effect.CK<TitleCase>Effect.
+  #expect(
+    ExpressiveSendEffect.expand("confetti")
+      == "com.apple.messages.effect.CKConfettiEffect")
+  #expect(
+    ExpressiveSendEffect.expand("lasers")
+      == "com.apple.messages.effect.CKLasersEffect")
+  #expect(
+    ExpressiveSendEffect.expand("celebration")
+      == "com.apple.messages.effect.CKCelebrationEffect")
+
+  // Case-insensitive on the short form.
+  #expect(
+    ExpressiveSendEffect.expand("InvisibleInk")
+      == "com.apple.MobileSMS.expressivesend.invisibleink")
+
+  // Already-expanded ids pass through untouched.
+  let expanded = "com.apple.MobileSMS.expressivesend.impact"
+  #expect(ExpressiveSendEffect.expand(expanded) == expanded)
+  let screenExpanded = "com.apple.messages.effect.CKHeartEffect"
+  #expect(ExpressiveSendEffect.expand(screenExpanded) == screenExpanded)
+
+  // Unknown short names pass through so the dylib can return its own error.
+  #expect(ExpressiveSendEffect.expand("totally-not-real") == "totally-not-real")
+}
+
+@Test
 func chatCreateRejectsUnsupportedServiceBeforeBridgeLaunch() async {
   let values = ParsedValues(
     positional: [],
