@@ -192,12 +192,25 @@ static void probeSelectors(void) {
 - (NSString *)guid;
 - (NSString *)localPath;
 - (NSString *)transferState;
+- (NSURL *)localURL;
+- (void)setLocalURL:(NSURL *)url;
 @end
 
 @interface IMFileTransferCenter : NSObject
 + (instancetype)sharedInstance;
-- (IMFileTransfer *)guidForNewOutgoingTransferWithLocalURL:(NSURL *)url;
+- (NSString *)guidForNewOutgoingTransferWithLocalURL:(NSURL *)url;
 - (IMFileTransfer *)transferForGUID:(NSString *)guid;
+- (void)retargetTransfer:(NSString *)guid toPath:(NSString *)path;
+- (void)registerTransferWithDaemon:(NSString *)guid;
+@end
+
+@interface IMDPersistentAttachmentController : NSObject
++ (instancetype)sharedInstance;
+- (NSString *)_persistentPathForTransfer:(IMFileTransfer *)transfer
+                                filename:(NSString *)filename
+                             highQuality:(BOOL)highQuality
+                                chatGUID:(NSString *)chatGUID
+                     storeAtExternalPath:(BOOL)external;
 @end
 
 @interface IMChatHistoryController : NSObject
@@ -1185,8 +1198,156 @@ static NSDictionary *handleSendMultipart(NSInteger requestId, NSDictionary *para
     }
 }
 
+/// Build an attachment-bearing attributed string. The placeholder is an OBJ
+/// replacement character (￼) tagged with the IMCore attachment attributes
+/// (`__kIMFileTransferGUIDAttributeName`, `__kIMFilenameAttributeName`,
+/// `__kIMMessagePartAttributeName`, `__kIMBaseWritingDirectionAttributeName`).
+/// Without these attributes Messages.app sends an empty-body message and never
+/// links the attachment row in chat.db.
+static NSAttributedString *buildAttachmentAttributed(NSString *transferGuid,
+                                                     NSString *filename,
+                                                     NSInteger partIndex) {
+    NSDictionary *attrs = @{
+        @"__kIMBaseWritingDirectionAttributeName": @"-1",
+        @"__kIMFileTransferGUIDAttributeName": transferGuid ?: @"",
+        @"__kIMFilenameAttributeName": filename ?: @"",
+        @"__kIMMessagePartAttributeName": @(partIndex),
+    };
+    return [[NSAttributedString alloc] initWithString:@"￼" attributes:attrs];
+}
+
+/// Register an outgoing file transfer with IMFileTransferCenter so that
+/// Messages.app/imagent persists the attachment row and links it back to the
+/// outbound message. Mirrors BlueBubblesHelper's `prepareFileTransferForAttachment`:
+///   1. Allocate a guid via `guidForNewOutgoingTransferWithLocalURL:`.
+///   2. Resolve the resulting `IMFileTransfer` via `transferForGUID:`.
+///   3. Ask `IMDPersistentAttachmentController` for the canonical attachment
+///      path and copy the source file there (Messages will only register
+///      transfers whose backing file lives in its container).
+///   4. `retargetTransfer:toPath:` + `setLocalURL:` to point the transfer at
+///      the persistent copy.
+///   5. `registerTransferWithDaemon:` so the daemon picks it up.
+/// On failure returns `nil`; the caller emits the error.
+static IMFileTransfer *prepareOutgoingTransfer(NSURL *originalURL, NSString *filename,
+                                               NSString **outErr) {
+    Class ftcClass = NSClassFromString(@"IMFileTransferCenter");
+    if (!ftcClass) {
+        if (outErr) *outErr = @"IMFileTransferCenter not available";
+        return nil;
+    }
+    id ftc = [ftcClass performSelector:@selector(sharedInstance)];
+    if (!ftc) {
+        if (outErr) *outErr = @"FileTransferCenter unavailable";
+        return nil;
+    }
+    if (![ftc respondsToSelector:@selector(guidForNewOutgoingTransferWithLocalURL:)]) {
+        if (outErr) *outErr = @"guidForNewOutgoingTransferWithLocalURL: unavailable";
+        return nil;
+    }
+
+    id rawGuid = [ftc performSelector:@selector(guidForNewOutgoingTransferWithLocalURL:)
+                           withObject:originalURL];
+    if (![rawGuid isKindOfClass:[NSString class]] || ![(NSString *)rawGuid length]) {
+        if (outErr) *outErr = @"Could not allocate transfer guid";
+        return nil;
+    }
+    NSString *transferGuid = (NSString *)rawGuid;
+
+    IMFileTransfer *transfer = nil;
+    if ([ftc respondsToSelector:@selector(transferForGUID:)]) {
+        transfer = [ftc performSelector:@selector(transferForGUID:) withObject:transferGuid];
+    }
+    if (!transfer) {
+        if (outErr) *outErr = @"Could not resolve IMFileTransfer for guid";
+        return nil;
+    }
+
+    // Try to copy the source file into the IMD-managed attachments tree and
+    // retarget the transfer. If the persistent-path API isn't available (older
+    // macOS), fall back to registering the transfer as-is — the daemon may
+    // still accept a path under a permissive location.
+    Class pacClass = NSClassFromString(@"IMDPersistentAttachmentController");
+    if (pacClass) {
+        id pac = [pacClass performSelector:@selector(sharedInstance)];
+        SEL pathSel = @selector(_persistentPathForTransfer:filename:highQuality:chatGUID:storeAtExternalPath:);
+        if (pac && [pac respondsToSelector:pathSel]) {
+            NSMethodSignature *sig = [pac methodSignatureForSelector:pathSel];
+            NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
+            [inv setSelector:pathSel];
+            [inv setTarget:pac];
+            __unsafe_unretained IMFileTransfer *xfer = transfer;
+            __unsafe_unretained NSString *fn = filename ?: [originalURL lastPathComponent];
+            __unsafe_unretained NSString *nilGuid = nil;
+            BOOL hi = YES;
+            BOOL ext = YES;
+            [inv setArgument:&xfer atIndex:2];
+            [inv setArgument:&fn atIndex:3];
+            [inv setArgument:&hi atIndex:4];
+            [inv setArgument:&nilGuid atIndex:5];
+            [inv setArgument:&ext atIndex:6];
+            [inv invoke];
+            __unsafe_unretained NSString *persistentPath = nil;
+            [inv getReturnValue:&persistentPath];
+
+            if (persistentPath.length) {
+                NSURL *persistentURL = [NSURL fileURLWithPath:persistentPath];
+                NSURL *parent = [persistentURL URLByDeletingLastPathComponent];
+                NSError *folderErr = nil;
+                [[NSFileManager defaultManager] createDirectoryAtURL:parent
+                                         withIntermediateDirectories:YES
+                                                          attributes:nil
+                                                               error:&folderErr];
+                if (folderErr) {
+                    if (outErr) *outErr = [NSString stringWithFormat:
+                        @"Failed to create attachment dir: %@", folderErr.localizedDescription];
+                    return nil;
+                }
+                // If the destination already exists (e.g., re-send of the same
+                // file), nuke the stale copy so copyItem doesn't fail.
+                if ([[NSFileManager defaultManager] fileExistsAtPath:persistentPath]) {
+                    [[NSFileManager defaultManager] removeItemAtURL:persistentURL error:NULL];
+                }
+                NSError *copyErr = nil;
+                [[NSFileManager defaultManager] copyItemAtURL:originalURL
+                                                        toURL:persistentURL
+                                                        error:&copyErr];
+                if (copyErr) {
+                    if (outErr) *outErr = [NSString stringWithFormat:
+                        @"Failed to copy attachment: %@", copyErr.localizedDescription];
+                    return nil;
+                }
+                if ([ftc respondsToSelector:@selector(retargetTransfer:toPath:)]) {
+                    NSMethodSignature *rsig = [ftc methodSignatureForSelector:
+                        @selector(retargetTransfer:toPath:)];
+                    NSInvocation *rinv = [NSInvocation invocationWithMethodSignature:rsig];
+                    [rinv setSelector:@selector(retargetTransfer:toPath:)];
+                    [rinv setTarget:ftc];
+                    __unsafe_unretained NSString *g = transferGuid;
+                    __unsafe_unretained NSString *p = persistentPath;
+                    [rinv setArgument:&g atIndex:2];
+                    [rinv setArgument:&p atIndex:3];
+                    [rinv invoke];
+                }
+                if ([transfer respondsToSelector:@selector(setLocalURL:)]) {
+                    [transfer performSelector:@selector(setLocalURL:) withObject:persistentURL];
+                }
+            }
+        }
+    }
+
+    // Register the transfer so imagent picks it up. BB notes this can warn
+    // silently on failure; we still try because skipping it leaves the
+    // attachment unsendable.
+    if ([ftc respondsToSelector:@selector(registerTransferWithDaemon:)]) {
+        [ftc performSelector:@selector(registerTransferWithDaemon:) withObject:transferGuid];
+    }
+    return transfer;
+}
+
 /// `send-attachment`: registers the file via IMFileTransferCenter and sends a
-/// (typically empty-body) message referencing that transfer guid.
+/// message whose attributedBody carries the OBJ placeholder tagged with the
+/// transfer guid (Messages requires this attribute or the attachment row is
+/// never linked to the outgoing message).
 static NSDictionary *handleSendAttachment(NSInteger requestId, NSDictionary *params) {
     NSString *chatGuid = params[@"chatGuid"];
     NSString *filePath = params[@"filePath"];
@@ -1206,26 +1367,22 @@ static NSDictionary *handleSendAttachment(NSInteger requestId, NSDictionary *par
             [NSString stringWithFormat:@"Chat not found: %@", chatGuid]);
     }
 
-    Class ftcClass = NSClassFromString(@"IMFileTransferCenter");
-    if (!ftcClass) {
-        return errorResponse(requestId, @"IMFileTransferCenter not available");
-    }
-    id ftc = [ftcClass performSelector:@selector(sharedInstance)];
-    if (!ftc) return errorResponse(requestId, @"FileTransferCenter unavailable");
-
     NSURL *fileURL = [NSURL fileURLWithPath:filePath];
+    NSString *filename = [fileURL lastPathComponent];
+
     @try {
-        id transferGuid = nil;
-        if ([ftc respondsToSelector:@selector(guidForNewOutgoingTransferWithLocalURL:)]) {
-            transferGuid = [ftc performSelector:
-                @selector(guidForNewOutgoingTransferWithLocalURL:)
-                                     withObject:fileURL];
+        NSString *prepErr = nil;
+        IMFileTransfer *transfer = prepareOutgoingTransfer(fileURL, filename, &prepErr);
+        if (!transfer) {
+            return errorResponse(requestId,
+                prepErr.length ? prepErr : @"Could not register attachment transfer");
         }
-        if (![transferGuid isKindOfClass:[NSString class]] || ![(NSString *)transferGuid length]) {
-            return errorResponse(requestId, @"Could not register attachment transfer");
+        NSString *transferGuid = [transfer guid];
+        if (!transferGuid.length) {
+            return errorResponse(requestId, @"Transfer registered without guid");
         }
 
-        NSAttributedString *body = buildPlainAttributed(@"￼", 0); // OBJ replacement char
+        NSAttributedString *body = buildAttachmentAttributed(transferGuid, filename, 0);
         id imMessage = buildIMMessage(body, nil, nil, nil, nil, 0,
                                       NSMakeRange(0, body.length), nil,
                                       @[transferGuid], isAudio, NO);
