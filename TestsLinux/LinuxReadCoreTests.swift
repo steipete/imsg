@@ -1,0 +1,163 @@
+import Foundation
+import SQLite
+import Testing
+
+@testable import IMsgCore
+
+@Test
+func readsMessageDatabaseFromCopiedFile() throws {
+  let databaseURL = try makeTemporaryDatabase()
+  try seedDatabase(at: databaseURL)
+
+  let store = try MessageStore(path: databaseURL.path)
+
+  let chats = try store.listChats(limit: 10)
+  #expect(chats.count == 1)
+  #expect(chats.first?.identifier == "+15551234567")
+  #expect(chats.first?.name == "Linux Fixture")
+
+  let messages = try store.messages(chatID: 1, limit: 10)
+  #expect(messages.map(\.text) == ["reply from mac", "hello from linux"])
+  #expect(messages.first?.isFromMe == true)
+  #expect(messages.last?.sender == "+15551234567")
+  #expect(messages.last?.isFromMe == false)
+
+  let matches = try store.searchMessages(query: "reply", match: "contains", limit: 5)
+  #expect(matches.count == 1)
+  #expect(matches.first?.text == "reply from mac")
+}
+
+@Test
+func linuxContactResolverIsExplicitlyUnavailable() async {
+  let resolver = await ContactResolver.create(region: "US")
+  #expect(resolver.contactsUnavailable)
+  #expect(resolver.displayName(for: "+15551234567") == nil)
+  #expect(resolver.displayNames(for: ["+15551234567"]).isEmpty)
+  #expect(resolver.searchByName("Jane").isEmpty)
+}
+
+@Test
+func linuxSendFailsWithPlatformMessage() throws {
+  let sender = MessageSender()
+
+  do {
+    try sender.send(MessageSendOptions(recipient: "+15551234567", text: "no-op"))
+    Issue.record("send unexpectedly succeeded on Linux")
+  } catch let error as IMsgError {
+    #expect(error.description.contains("only supported on macOS"))
+  }
+}
+
+@Test
+func linuxTypingIndicatorFailsWithPlatformMessage() throws {
+  do {
+    try TypingIndicator.startTyping(chatIdentifier: "iMessage;-;+15551234567")
+    Issue.record("typing unexpectedly succeeded on Linux")
+  } catch let error as IMsgError {
+    #expect(error.description.contains("only supported on macOS"))
+  }
+}
+
+private func makeTemporaryDatabase() throws -> URL {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+    "imsg-linux-tests-\(UUID().uuidString)",
+    isDirectory: true
+  )
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  return directory.appendingPathComponent("chat.db")
+}
+
+private func seedDatabase(at url: URL) throws {
+  let db = try Connection(url.path)
+  try createSchema(db)
+
+  let now = Date()
+  try db.run(
+    """
+    INSERT INTO chat(
+      ROWID, chat_identifier, guid, display_name, service_name,
+      account_id, account_login, last_addressed_handle
+    )
+    VALUES (
+      1, '+15551234567', 'iMessage;+;linux-fixture', 'Linux Fixture', 'iMessage',
+      'iMessage;+;me@example.com', 'me@example.com', '+15551234567'
+    )
+    """
+  )
+  try db.run("INSERT INTO handle(ROWID, id) VALUES (1, '+15551234567'), (2, 'Me')")
+  try db.run("INSERT INTO chat_handle_join(chat_id, handle_id) VALUES (1, 1), (1, 2)")
+
+  let rows: [(Int64, Int64, String, Bool, Date)] = [
+    (1, 1, "hello from linux", false, now.addingTimeInterval(-60)),
+    (2, 2, "reply from mac", true, now),
+  ]
+  for row in rows {
+    try db.run(
+      """
+      INSERT INTO message(ROWID, handle_id, text, date, is_from_me, service)
+      VALUES (?, ?, ?, ?, ?, 'iMessage')
+      """,
+      row.0,
+      row.1,
+      row.2,
+      appleEpoch(row.4),
+      row.3 ? 1 : 0
+    )
+    try db.run("INSERT INTO chat_message_join(chat_id, message_id) VALUES (1, ?)", row.0)
+  }
+}
+
+private func createSchema(_ db: Connection) throws {
+  try db.execute(
+    """
+    CREATE TABLE message (
+      ROWID INTEGER PRIMARY KEY,
+      handle_id INTEGER,
+      text TEXT,
+      guid TEXT,
+      associated_message_guid TEXT,
+      associated_message_type INTEGER,
+      date INTEGER,
+      is_from_me INTEGER,
+      service TEXT
+    );
+    """
+  )
+  try db.execute(
+    """
+    CREATE TABLE chat (
+      ROWID INTEGER PRIMARY KEY,
+      chat_identifier TEXT,
+      guid TEXT,
+      display_name TEXT,
+      service_name TEXT,
+      account_id TEXT,
+      account_login TEXT,
+      last_addressed_handle TEXT
+    );
+    """
+  )
+  try db.execute("CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT);")
+  try db.execute("CREATE TABLE chat_handle_join (chat_id INTEGER, handle_id INTEGER);")
+  try db.execute("CREATE TABLE chat_message_join (chat_id INTEGER, message_id INTEGER);")
+  try db.execute(
+    """
+    CREATE TABLE attachment (
+      ROWID INTEGER PRIMARY KEY,
+      filename TEXT,
+      transfer_name TEXT,
+      uti TEXT,
+      mime_type TEXT,
+      total_bytes INTEGER,
+      is_sticker INTEGER
+    );
+    """
+  )
+  try db.execute(
+    "CREATE TABLE message_attachment_join (message_id INTEGER, attachment_id INTEGER);")
+}
+
+private func appleEpoch(_ date: Date) -> Int64 {
+  let seconds = date.timeIntervalSince1970 - MessageStore.appleEpochOffset
+  return Int64(seconds * 1_000_000_000)
+}

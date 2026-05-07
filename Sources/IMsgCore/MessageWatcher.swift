@@ -1,5 +1,8 @@
-import Darwin
 import Foundation
+
+#if os(macOS)
+  import Darwin
+#endif
 
 public struct MessageWatcherConfiguration: Sendable, Equatable {
   public var debounceInterval: TimeInterval
@@ -57,7 +60,9 @@ private final class WatchState: @unchecked Sendable {
   private let queue = DispatchQueue(label: "imsg.watch", qos: .userInitiated)
 
   private var cursor: Int64
-  private var sources: [DispatchSourceFileSystemObject] = []
+  #if os(macOS)
+    private var sources: [DispatchSourceFileSystemObject] = []
+  #endif
   private var pending = false
   private var stopped = false
 
@@ -87,12 +92,14 @@ private final class WatchState: @unchecked Sendable {
       }
     }
 
-    let paths = [store.path, store.path + "-wal", store.path + "-shm"]
-    for path in paths {
-      if let source = makeSource(path: path) {
-        sources.append(source)
+    #if os(macOS)
+      let paths = [store.path, store.path + "-wal", store.path + "-shm"]
+      for path in paths {
+        if let source = makeSource(path: path) {
+          sources.append(source)
+        }
       }
-    }
+    #endif
 
     queue.async {
       self.scheduleFallbackPoll()
@@ -102,30 +109,34 @@ private final class WatchState: @unchecked Sendable {
   func stop() {
     queue.async {
       self.stopped = true
-      for source in self.sources {
-        source.cancel()
-      }
-      self.sources.removeAll()
+      #if os(macOS)
+        for source in self.sources {
+          source.cancel()
+        }
+        self.sources.removeAll()
+      #endif
     }
   }
 
-  private func makeSource(path: String) -> DispatchSourceFileSystemObject? {
-    let fd = open(path, O_EVTONLY)
-    guard fd >= 0 else { return nil }
-    let source = DispatchSource.makeFileSystemObjectSource(
-      fileDescriptor: fd,
-      eventMask: [.write, .extend, .rename, .delete],
-      queue: queue
-    )
-    source.setEventHandler { [weak self] in
-      self?.schedulePoll()
+  #if os(macOS)
+    private func makeSource(path: String) -> DispatchSourceFileSystemObject? {
+      let fd = open(path, O_EVTONLY)
+      guard fd >= 0 else { return nil }
+      let source = DispatchSource.makeFileSystemObjectSource(
+        fileDescriptor: fd,
+        eventMask: [.write, .extend, .rename, .delete],
+        queue: queue
+      )
+      source.setEventHandler { [weak self] in
+        self?.schedulePoll()
+      }
+      source.setCancelHandler {
+        close(fd)
+      }
+      source.resume()
+      return source
     }
-    source.setCancelHandler {
-      close(fd)
-    }
-    source.resume()
-    return source
-  }
+  #endif
 
   private func schedulePoll() {
     if stopped { return }

@@ -7,12 +7,18 @@ on:
         description: "Tag to (re)release (e.g. v0.1.0)"
         required: true
         type: string
+      include_macos:
+        description: "Also rebuild and upload the macOS archive"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
 
 jobs:
-  release:
+  macos-release:
+    if: ${{ inputs.include_macos }}
     runs-on: macos-latest
     steps:
       - name: Checkout
@@ -92,3 +98,55 @@ jobs:
           fi
 
           gh release edit "$TAG" --notes-file "$notes_file"
+
+  linux-release:
+    runs-on: ubuntu-latest
+    container: swift:6.2.4-noble
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Determine tag
+        id: tag
+        shell: bash
+        run: |
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout release tag
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        run: git checkout ${{ steps.tag.outputs.tag }}
+
+      - name: Install Python
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends python3
+
+      - name: Resolve packages
+        run: swift package resolve
+
+      - name: Patch dependencies
+        run: scripts/patch-deps.sh
+
+      - name: Sync version
+        run: scripts/generate-version.sh
+
+      - name: Build Linux archive
+        run: |
+          rm -rf dist
+          OUTPUT_DIR=dist scripts/build-linux.sh
+
+      - name: Publish Linux release asset
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: ${{ steps.tag.outputs.tag }}
+          files: dist/imsg-linux-x86_64.tar.gz
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -6,7 +6,7 @@ on:
   pull_request:
 
 jobs:
-  build:
+  macos:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v6
@@ -20,3 +20,25 @@ jobs:
         run: make test
       - name: Build
         run: make build ARCHES="$(uname -m)"
+
+  linux-read-core:
+    runs-on: ubuntu-latest
+    container: swift:6.2.4-noble
+    steps:
+      - uses: actions/checkout@v6
+      - name: Swift version
+        run: swift --version
+      - name: Install Python
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends python3
+      - name: Generate version
+        run: scripts/generate-version.sh
+      - name: Resolve dependencies
+        run: swift package resolve
+      - name: Patch dependencies
+        run: scripts/patch-deps.sh
+      - name: Test Linux read core
+        run: swift test
+      - name: Build CLI
+        run: swift build --product imsg

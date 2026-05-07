@@ -1,5 +1,10 @@
-import Darwin
 import Foundation
+
+#if canImport(Darwin)
+  import Darwin
+#elseif canImport(Glibc)
+  import Glibc
+#endif
 
 /// Lexical-walk symlink detector. Used wherever we accept a filesystem path
 /// from outside the dylib (RPC inbox dir, attachment paths) and want to refuse

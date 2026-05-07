@@ -1,5 +1,8 @@
-@preconcurrency import Contacts
 import Foundation
+
+#if os(macOS)
+  @preconcurrency import Contacts
+#endif
 
 public struct ContactMatch: Equatable, Sendable {
   public let name: String
@@ -32,153 +35,181 @@ public final class NoOpContactResolver: ContactResolving, Sendable {
 }
 
 public final class ContactResolver: ContactResolving, @unchecked Sendable {
-  private let phoneToName: [String: String]
-  private let emailToName: [String: String]
-  private let contacts: [ContactRecord]
-  private let normalizer = PhoneNumberNormalizer()
-  private let region: String
+  #if os(macOS)
+    private let phoneToName: [String: String]
+    private let emailToName: [String: String]
+    private let contacts: [ContactRecord]
+    private let normalizer = PhoneNumberNormalizer()
+    private let region: String
 
-  public let contactsUnavailable: Bool
+    public let contactsUnavailable: Bool
 
-  private init(
-    phoneToName: [String: String],
-    emailToName: [String: String],
-    contacts: [ContactRecord],
-    region: String
-  ) {
-    self.phoneToName = phoneToName
-    self.emailToName = emailToName
-    self.contacts = contacts
-    self.region = region
-    self.contactsUnavailable = false
-  }
+    private init(
+      phoneToName: [String: String],
+      emailToName: [String: String],
+      contacts: [ContactRecord],
+      region: String
+    ) {
+      self.phoneToName = phoneToName
+      self.emailToName = emailToName
+      self.contacts = contacts
+      self.region = region
+      self.contactsUnavailable = false
+    }
+  #else
+    public let contactsUnavailable = true
+  #endif
 
   public static func create(region: String = "US") async -> any ContactResolving {
-    let store = CNContactStore()
-    switch CNContactStore.authorizationStatus(for: .contacts) {
-    case .authorized:
-      return load(store: store, region: region)
-    case .notDetermined:
-      let granted = await requestAccess(store: store)
-      return granted
-        ? load(store: store, region: region) : NoOpContactResolver(contactsUnavailable: true)
-    case .denied, .restricted:
+    #if os(macOS)
+      let store = CNContactStore()
+      switch CNContactStore.authorizationStatus(for: .contacts) {
+      case .authorized:
+        return load(store: store, region: region)
+      case .notDetermined:
+        let granted = await requestAccess(store: store)
+        return granted
+          ? load(store: store, region: region) : NoOpContactResolver(contactsUnavailable: true)
+      case .denied, .restricted:
+        return NoOpContactResolver(contactsUnavailable: true)
+      @unknown default:
+        return NoOpContactResolver(contactsUnavailable: true)
+      }
+    #else
+      _ = region
       return NoOpContactResolver(contactsUnavailable: true)
-    @unknown default:
-      return NoOpContactResolver(contactsUnavailable: true)
-    }
+    #endif
   }
 
   public func displayName(for handle: String) -> String? {
-    let lookup = normalizedLookupHandle(handle)
-    if lookup.contains("@") {
-      return emailToName[lookup.lowercased()]
-    }
-    return phoneToName[normalizer.normalize(lookup, region: region)]
+    #if os(macOS)
+      let lookup = normalizedLookupHandle(handle)
+      if lookup.contains("@") {
+        return emailToName[lookup.lowercased()]
+      }
+      return phoneToName[normalizer.normalize(lookup, region: region)]
+    #else
+      _ = handle
+      return nil
+    #endif
   }
 
   public func displayNames(for handles: [String]) -> [String: String] {
-    var resolved: [String: String] = [:]
-    for handle in handles {
-      if let name = displayName(for: handle) {
-        resolved[handle] = name
+    #if os(macOS)
+      var resolved: [String: String] = [:]
+      for handle in handles {
+        if let name = displayName(for: handle) {
+          resolved[handle] = name
+        }
       }
-    }
-    return resolved
+      return resolved
+    #else
+      _ = handles
+      return [:]
+    #endif
   }
 
   public func searchByName(_ query: String) -> [ContactMatch] {
-    let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-    guard !normalizedQuery.isEmpty else { return [] }
+    #if os(macOS)
+      let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+      guard !normalizedQuery.isEmpty else { return [] }
 
-    var matches: [ContactMatch] = []
-    for contact in contacts where contact.name.lowercased().contains(normalizedQuery) {
-      if let phone = contact.phones.first {
-        matches.append(ContactMatch(name: contact.name, handle: phone))
-      } else if let email = contact.emails.first {
-        matches.append(ContactMatch(name: contact.name, handle: email))
-      }
-    }
-    return matches
-  }
-
-  private static func requestAccess(store: CNContactStore) async -> Bool {
-    await withCheckedContinuation { continuation in
-      store.requestAccess(for: .contacts) { granted, _ in
-        continuation.resume(returning: granted)
-      }
-    }
-  }
-
-  private static func load(store: CNContactStore, region: String) -> any ContactResolving {
-    let keysToFetch: [CNKeyDescriptor] = [
-      CNContactGivenNameKey as CNKeyDescriptor,
-      CNContactFamilyNameKey as CNKeyDescriptor,
-      CNContactNicknameKey as CNKeyDescriptor,
-      CNContactPhoneNumbersKey as CNKeyDescriptor,
-      CNContactEmailAddressesKey as CNKeyDescriptor,
-    ]
-    let request = CNContactFetchRequest(keysToFetch: keysToFetch)
-    let normalizer = PhoneNumberNormalizer()
-    var phoneToName: [String: String] = [:]
-    var emailToName: [String: String] = [:]
-    var contacts: [ContactRecord] = []
-
-    do {
-      try store.enumerateContacts(with: request) { contact, _ in
-        guard let name = displayName(for: contact) else { return }
-        var phones: [String] = []
-        var emails: [String] = []
-
-        for number in contact.phoneNumbers {
-          let normalized = normalizer.normalize(number.value.stringValue, region: region)
-          phones.append(normalized)
-          phoneToName[normalized] = phoneToName[normalized] ?? name
-        }
-        for email in contact.emailAddresses {
-          let normalized = String(email.value).lowercased()
-          emails.append(normalized)
-          emailToName[normalized] = emailToName[normalized] ?? name
-        }
-
-        if !phones.isEmpty || !emails.isEmpty {
-          contacts.append(ContactRecord(name: name, phones: phones, emails: emails))
+      var matches: [ContactMatch] = []
+      for contact in contacts where contact.name.lowercased().contains(normalizedQuery) {
+        if let phone = contact.phones.first {
+          matches.append(ContactMatch(name: contact.name, handle: phone))
+        } else if let email = contact.emails.first {
+          matches.append(ContactMatch(name: contact.name, handle: email))
         }
       }
-    } catch {
-      return NoOpContactResolver(contactsUnavailable: true)
-    }
-
-    return ContactResolver(
-      phoneToName: phoneToName,
-      emailToName: emailToName,
-      contacts: contacts,
-      region: region
-    )
+      return matches
+    #else
+      _ = query
+      return []
+    #endif
   }
 
-  private static func displayName(for contact: CNContact) -> String? {
-    if !contact.nickname.isEmpty {
-      return contact.nickname
+  #if os(macOS)
+    private static func requestAccess(store: CNContactStore) async -> Bool {
+      await withCheckedContinuation { continuation in
+        store.requestAccess(for: .contacts) { granted, _ in
+          continuation.resume(returning: granted)
+        }
+      }
     }
-    let name = [contact.givenName, contact.familyName]
-      .filter { !$0.isEmpty }
-      .joined(separator: " ")
-    return name.isEmpty ? nil : name
-  }
 
-  private func normalizedLookupHandle(_ handle: String) -> String {
-    let trimmed = handle.trimmingCharacters(in: .whitespacesAndNewlines)
-    for prefix in ["iMessage;-;", "iMessage;+;", "SMS;-;", "SMS;+;", "any;-;", "any;+;"]
-    where trimmed.hasPrefix(prefix) {
-      return String(trimmed.dropFirst(prefix.count))
+    private static func load(store: CNContactStore, region: String) -> any ContactResolving {
+      let keysToFetch: [CNKeyDescriptor] = [
+        CNContactGivenNameKey as CNKeyDescriptor,
+        CNContactFamilyNameKey as CNKeyDescriptor,
+        CNContactNicknameKey as CNKeyDescriptor,
+        CNContactPhoneNumbersKey as CNKeyDescriptor,
+        CNContactEmailAddressesKey as CNKeyDescriptor,
+      ]
+      let request = CNContactFetchRequest(keysToFetch: keysToFetch)
+      let normalizer = PhoneNumberNormalizer()
+      var phoneToName: [String: String] = [:]
+      var emailToName: [String: String] = [:]
+      var contacts: [ContactRecord] = []
+
+      do {
+        try store.enumerateContacts(with: request) { contact, _ in
+          guard let name = displayName(for: contact) else { return }
+          var phones: [String] = []
+          var emails: [String] = []
+
+          for number in contact.phoneNumbers {
+            let normalized = normalizer.normalize(number.value.stringValue, region: region)
+            phones.append(normalized)
+            phoneToName[normalized] = phoneToName[normalized] ?? name
+          }
+          for email in contact.emailAddresses {
+            let normalized = String(email.value).lowercased()
+            emails.append(normalized)
+            emailToName[normalized] = emailToName[normalized] ?? name
+          }
+
+          if !phones.isEmpty || !emails.isEmpty {
+            contacts.append(ContactRecord(name: name, phones: phones, emails: emails))
+          }
+        }
+      } catch {
+        return NoOpContactResolver(contactsUnavailable: true)
+      }
+
+      return ContactResolver(
+        phoneToName: phoneToName,
+        emailToName: emailToName,
+        contacts: contacts,
+        region: region
+      )
     }
-    return trimmed
-  }
+
+    private static func displayName(for contact: CNContact) -> String? {
+      if !contact.nickname.isEmpty {
+        return contact.nickname
+      }
+      let name = [contact.givenName, contact.familyName]
+        .filter { !$0.isEmpty }
+        .joined(separator: " ")
+      return name.isEmpty ? nil : name
+    }
+
+    private func normalizedLookupHandle(_ handle: String) -> String {
+      let trimmed = handle.trimmingCharacters(in: .whitespacesAndNewlines)
+      for prefix in ["iMessage;-;", "iMessage;+;", "SMS;-;", "SMS;+;", "any;-;", "any;+;"]
+      where trimmed.hasPrefix(prefix) {
+        return String(trimmed.dropFirst(prefix.count))
+      }
+      return trimmed
+    }
+  #endif
 }
 
-private struct ContactRecord: Sendable {
-  let name: String
-  let phones: [String]
-  let emails: [String]
-}
+#if os(macOS)
+  private struct ContactRecord: Sendable {
+    let name: String
+    let phones: [String]
+    let emails: [String]
+  }
+#endif

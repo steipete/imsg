@@ -1,5 +1,8 @@
-import CryptoKit
 import Foundation
+
+#if canImport(CryptoKit)
+  import CryptoKit
+#endif
 
 enum AttachmentResolver {
   private struct ConversionPlan {
@@ -58,9 +61,7 @@ enum AttachmentResolver {
     let modification = values?.contentModificationDate?.timeIntervalSince1970 ?? 0
     let size = values?.fileSize ?? 0
     let token = "\(sourceURL.path)|\(size)|\(modification)"
-    let digest = SHA256.hash(data: Data(token.utf8))
-      .map { String(format: "%02x", $0) }
-      .joined()
+    let digest = cacheDigest(for: token)
     let base = sourceURL.deletingPathExtension().lastPathComponent
       .components(separatedBy: CharacterSet.alphanumerics.inverted)
       .filter { !$0.isEmpty }
@@ -156,6 +157,23 @@ enum AttachmentResolver {
       "imsg/converted-attachments",
       isDirectory: true
     )
+  }
+
+  private static func cacheDigest(for token: String) -> String {
+    #if canImport(CryptoKit)
+      return SHA256.hash(data: Data(token.utf8))
+        .map { String(format: "%02x", $0) }
+        .joined()
+    #else
+      // Linux Swift does not ship CryptoKit. This digest only names cache files;
+      // it is not used as a security boundary, so stable FNV-1a is enough.
+      var hash: UInt64 = 14_695_981_039_346_656_037
+      for byte in token.utf8 {
+        hash ^= UInt64(byte)
+        hash &*= 1_099_511_628_211
+      }
+      return String(format: "%016llx", hash)
+    #endif
   }
 
   private static func executableURL(named name: String) -> URL? {

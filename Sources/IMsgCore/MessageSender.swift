@@ -1,5 +1,8 @@
-import Carbon
 import Foundation
+
+#if os(macOS)
+  import Carbon
+#endif
 
 public enum MessageService: String, Sendable, CaseIterable {
   case auto
@@ -62,20 +65,26 @@ public struct MessageSender {
   }
 
   public func send(_ options: MessageSendOptions) throws {
-    var resolved = options
-    let chatTarget = resolveChatTarget(&resolved)
-    let useChat = !chatTarget.isEmpty
-    if useChat == false {
-      if resolved.region.isEmpty { resolved.region = "US" }
-      resolved.recipient = normalizer.normalize(resolved.recipient, region: resolved.region)
-      if resolved.service == .auto { resolved.service = .imessage }
-    }
+    #if !os(macOS)
+      _ = options
+      throw IMsgError.appleScriptFailure(
+        "Sending requires Messages.app automation and is only supported on macOS.")
+    #else
+      var resolved = options
+      let chatTarget = resolveChatTarget(&resolved)
+      let useChat = !chatTarget.isEmpty
+      if useChat == false {
+        if resolved.region.isEmpty { resolved.region = "US" }
+        resolved.recipient = normalizer.normalize(resolved.recipient, region: resolved.region)
+        if resolved.service == .auto { resolved.service = .imessage }
+      }
 
-    if resolved.attachmentPath.isEmpty == false {
-      resolved.attachmentPath = try stageAttachment(at: resolved.attachmentPath)
-    }
+      if resolved.attachmentPath.isEmpty == false {
+        resolved.attachmentPath = try stageAttachment(at: resolved.attachmentPath)
+      }
 
-    try sendViaAppleScript(resolved, chatTarget: chatTarget, useChat: useChat)
+      try sendViaAppleScript(resolved, chatTarget: chatTarget, useChat: useChat)
+    #endif
   }
 
   private func stageAttachment(at path: String) throws -> String {
@@ -202,48 +211,60 @@ public struct MessageSender {
   }
 
   private static func runAppleScript(source: String, arguments: [String]) throws {
-    guard let script = NSAppleScript(source: source) else {
-      throw IMsgError.appleScriptFailure("Unable to compile AppleScript")
-    }
-    var errorInfo: NSDictionary?
-    let event = NSAppleEventDescriptor(
-      eventClass: AEEventClass(kASAppleScriptSuite),
-      eventID: AEEventID(kASSubroutineEvent),
-      targetDescriptor: nil,
-      returnID: AEReturnID(kAutoGenerateReturnID),
-      transactionID: AETransactionID(kAnyTransactionID)
-    )
-    event.setParam(
-      NSAppleEventDescriptor(string: "run"), forKeyword: AEKeyword(keyASSubroutineName))
-    let list = NSAppleEventDescriptor.list()
-    for (index, value) in arguments.enumerated() {
-      list.insert(NSAppleEventDescriptor(string: value), at: index + 1)
-    }
-    event.setParam(list, forKeyword: keyDirectObject)
-    script.executeAppleEvent(event, error: &errorInfo)
-    if let errorInfo {
-      if shouldFallbackToOsascript(errorInfo: errorInfo) {
-        try runOsascript(source: source, arguments: arguments)
-        return
+    #if os(macOS)
+      guard let script = NSAppleScript(source: source) else {
+        throw IMsgError.appleScriptFailure("Unable to compile AppleScript")
       }
-      let message =
-        (errorInfo[NSAppleScript.errorMessage] as? String) ?? "Unknown AppleScript error"
-      throw IMsgError.appleScriptFailure(message)
-    }
+      var errorInfo: NSDictionary?
+      let event = NSAppleEventDescriptor(
+        eventClass: AEEventClass(kASAppleScriptSuite),
+        eventID: AEEventID(kASSubroutineEvent),
+        targetDescriptor: nil,
+        returnID: AEReturnID(kAutoGenerateReturnID),
+        transactionID: AETransactionID(kAnyTransactionID)
+      )
+      event.setParam(
+        NSAppleEventDescriptor(string: "run"), forKeyword: AEKeyword(keyASSubroutineName))
+      let list = NSAppleEventDescriptor.list()
+      for (index, value) in arguments.enumerated() {
+        list.insert(NSAppleEventDescriptor(string: value), at: index + 1)
+      }
+      event.setParam(list, forKeyword: keyDirectObject)
+      script.executeAppleEvent(event, error: &errorInfo)
+      if let errorInfo {
+        if shouldFallbackToOsascript(errorInfo: errorInfo) {
+          try runOsascript(source: source, arguments: arguments)
+          return
+        }
+        let message =
+          (errorInfo[NSAppleScript.errorMessage] as? String) ?? "Unknown AppleScript error"
+        throw IMsgError.appleScriptFailure(message)
+      }
+    #else
+      _ = source
+      _ = arguments
+      throw IMsgError.appleScriptFailure(
+        "Sending requires Messages.app automation and is only supported on macOS.")
+    #endif
   }
 
   private static func shouldFallbackToOsascript(errorInfo: NSDictionary) -> Bool {
-    if let errorNumber = errorInfo[NSAppleScript.errorNumber] as? Int, errorNumber == -1743 {
-      return true
-    }
-    if errorInfo[NSAppleScript.errorMessage] == nil {
-      return true
-    }
-    if let message = errorInfo[NSAppleScript.errorMessage] as? String {
-      let lower = message.lowercased()
-      return lower.contains("not authorized") || lower.contains("not authorised")
-    }
-    return false
+    #if os(macOS)
+      if let errorNumber = errorInfo[NSAppleScript.errorNumber] as? Int, errorNumber == -1743 {
+        return true
+      }
+      if errorInfo[NSAppleScript.errorMessage] == nil {
+        return true
+      }
+      if let message = errorInfo[NSAppleScript.errorMessage] as? String {
+        let lower = message.lowercased()
+        return lower.contains("not authorized") || lower.contains("not authorised")
+      }
+      return false
+    #else
+      _ = errorInfo
+      return false
+    #endif
   }
 
   private static func runOsascript(source: String, arguments: [String]) throws {

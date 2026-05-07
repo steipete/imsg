@@ -1,5 +1,9 @@
 import Foundation
 
+#if os(macOS)
+  import Darwin
+#endif
+
 /// Live tailer for `.imsg-events.jsonl` written by the injected dylib.
 ///
 /// Uses `DispatchSource.makeFileSystemObjectSource` watching `.write`,
@@ -36,9 +40,11 @@ public final class IMsgEventTailer: @unchecked Sendable {
 
   private let path: String
   private let replayExisting: Bool
-  private var source: DispatchSourceFileSystemObject?
-  private var fd: Int32 = -1
-  private var pending = Data()
+  #if os(macOS)
+    private var source: DispatchSourceFileSystemObject?
+    private var fd: Int32 = -1
+    private var pending = Data()
+  #endif
   private var continuation: AsyncStream<Event>.Continuation?
   private let queue = DispatchQueue(label: "imsg.event.tailer")
 
@@ -55,109 +61,115 @@ public final class IMsgEventTailer: @unchecked Sendable {
       continuation.onTermination = { @Sendable _ in
         self.stop()
       }
-      self.queue.async {
-        self.openAndStart()
-      }
+      #if os(macOS)
+        self.queue.async {
+          self.openAndStart()
+        }
+      #endif
     }
   }
 
   public func stop() {
-    queue.async { [weak self] in
-      guard let self else { return }
-      self.source?.cancel()
-      self.source = nil
-      if self.fd >= 0 {
-        close(self.fd)
-        self.fd = -1
+    #if os(macOS)
+      queue.async { [weak self] in
+        guard let self else { return }
+        self.source?.cancel()
+        self.source = nil
+        if self.fd >= 0 {
+          close(self.fd)
+          self.fd = -1
+        }
       }
-    }
+    #endif
   }
 
   // MARK: - Private
 
-  private func openAndStart() {
-    if !FileManager.default.fileExists(atPath: path) {
-      // Create empty file so we can watch it. The dylib appends; missing
-      // file means injection isn't active yet — caller can retry later.
-      FileManager.default.createFile(atPath: path, contents: Data(), attributes: nil)
-    }
-    let fd = open(path, O_RDONLY)
-    if fd < 0 { return }
-    self.fd = fd
-    if replayExisting {
-      drainAvailable()
-    } else {
-      lseek(fd, 0, SEEK_END)
-    }
-
-    let src = DispatchSource.makeFileSystemObjectSource(
-      fileDescriptor: fd,
-      eventMask: [.extend, .write, .rename, .delete],
-      queue: queue
-    )
-    src.setEventHandler { [weak self] in
-      guard let self else { return }
-      let mask = src.data
-      if mask.contains(.rename) || mask.contains(.delete) {
-        // File rotated by the dylib — close and reopen the new file.
-        self.reopen()
-        return
+  #if os(macOS)
+    private func openAndStart() {
+      if !FileManager.default.fileExists(atPath: path) {
+        // Create empty file so we can watch it. The dylib appends; missing
+        // file means injection isn't active yet — caller can retry later.
+        FileManager.default.createFile(atPath: path, contents: Data(), attributes: nil)
       }
-      self.drainAvailable()
+      let fd = open(path, O_RDONLY)
+      if fd < 0 { return }
+      self.fd = fd
+      if replayExisting {
+        drainAvailable()
+      } else {
+        lseek(fd, 0, SEEK_END)
+      }
+
+      let src = DispatchSource.makeFileSystemObjectSource(
+        fileDescriptor: fd,
+        eventMask: [.extend, .write, .rename, .delete],
+        queue: queue
+      )
+      src.setEventHandler { [weak self] in
+        guard let self else { return }
+        let mask = src.data
+        if mask.contains(.rename) || mask.contains(.delete) {
+          // File rotated by the dylib — close and reopen the new file.
+          self.reopen()
+          return
+        }
+        self.drainAvailable()
+      }
+      src.setCancelHandler { [weak self] in
+        guard let self else { return }
+        if self.fd >= 0 {
+          close(self.fd)
+          self.fd = -1
+        }
+      }
+      src.resume()
+      self.source = src
     }
-    src.setCancelHandler { [weak self] in
-      guard let self else { return }
-      if self.fd >= 0 {
-        close(self.fd)
-        self.fd = -1
+
+    private func reopen() {
+      source?.cancel()
+      source = nil
+      if fd >= 0 {
+        close(fd)
+        fd = -1
+      }
+      pending.removeAll(keepingCapacity: true)
+      // Small delay lets the dylib finish the rename; then start fresh.
+      queue.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+        self?.openAndStart()
       }
     }
-    src.resume()
-    self.source = src
-  }
 
-  private func reopen() {
-    source?.cancel()
-    source = nil
-    if fd >= 0 {
-      close(fd)
-      fd = -1
-    }
-    pending.removeAll(keepingCapacity: true)
-    // Small delay lets the dylib finish the rename; then start fresh.
-    queue.asyncAfter(deadline: .now() + 0.25) { [weak self] in
-      self?.openAndStart()
-    }
-  }
-
-  private func drainAvailable() {
-    guard fd >= 0 else { return }
-    var buffer = Data(count: 8192)
-    while true {
-      let n = buffer.withUnsafeMutableBytes { (raw: UnsafeMutableRawBufferPointer) -> Int in
-        guard let base = raw.baseAddress else { return -1 }
-        return read(fd, base, raw.count)
+    private func drainAvailable() {
+      guard fd >= 0 else { return }
+      var buffer = Data(count: 8192)
+      while true {
+        let n = buffer.withUnsafeMutableBytes { (raw: UnsafeMutableRawBufferPointer) -> Int in
+          guard let base = raw.baseAddress else { return -1 }
+          return read(fd, base, raw.count)
+        }
+        if n <= 0 { break }
+        pending.append(buffer.prefix(n))
+        processPending()
       }
-      if n <= 0 { break }
-      pending.append(buffer.prefix(n))
-      processPending()
     }
-  }
 
-  private func processPending() {
-    while let nl = pending.firstIndex(of: 0x0A) {
-      let line = pending[..<nl]
-      pending.removeSubrange(...nl)
-      guard !line.isEmpty else { continue }
-      guard
-        let obj = try? JSONSerialization.jsonObject(with: line, options: [])
-          as? [String: Any]
-      else { continue }
-      let name = (obj["event"] as? String) ?? "unknown"
-      let ts = obj["ts"] as? String
-      let data = (obj["data"] as? [String: Any]) ?? [:]
-      let payloadData = (try? JSONSerialization.data(withJSONObject: data, options: [])) ?? Data()
-      continuation?.yield(Event(timestamp: ts, name: name, payloadJSON: payloadData))
+    private func processPending() {
+      while let nl = pending.firstIndex(of: 0x0A) {
+        let line = pending[..<nl]
+        pending.removeSubrange(...nl)
+        guard !line.isEmpty else { continue }
+        guard
+          let obj = try? JSONSerialization.jsonObject(with: line, options: [])
+            as? [String: Any]
+        else { continue }
+        let name = (obj["event"] as? String) ?? "unknown"
+        let ts = obj["ts"] as? String
+        let data = (obj["data"] as? [String: Any]) ?? [:]
+        let payloadData = (try? JSONSerialization.data(withJSONObject: data, options: [])) ?? Data()
+        continuation?.yield(Event(timestamp: ts, name: name, payloadJSON: payloadData))
+      }
     }
-  }
+  #endif
 }

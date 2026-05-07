@@ -2,62 +2,85 @@
 import PackageDescription
 
 let package = Package(
-    name: "imsg",
-    platforms: [.macOS(.v14)],
-    products: [
-        .library(name: "IMsgCore", targets: ["IMsgCore"]),
-        .executable(name: "imsg", targets: ["imsg"]),
-    ],
-    dependencies: [
-        .package(url: "https://github.com/steipete/Commander.git", from: "0.2.1"),
-        .package(url: "https://github.com/stephencelis/SQLite.swift.git", from: "0.15.5"),
-        .package(url: "https://github.com/marmelroy/PhoneNumberKit.git", from: "4.2.5"),
-    ],
-    targets: [
-        .target(
-            name: "IMsgCore",
-            dependencies: [
-                .product(name: "SQLite", package: "SQLite.swift"),
-                .product(name: "PhoneNumberKit", package: "PhoneNumberKit"),
-            ],
-            linkerSettings: [
-                .linkedFramework("ScriptingBridge"),
-                .linkedFramework("Contacts"),
-            ]
-        ),
-    .executableTarget(
-        name: "imsg",
+  name: "imsg",
+  platforms: [.macOS(.v14)],
+  products: [
+    .library(name: "IMsgCore", targets: ["IMsgCore"]),
+    .executable(name: "imsg", targets: ["imsg"]),
+  ],
+  dependencies: [
+    .package(url: "https://github.com/steipete/Commander.git", from: "0.2.1"),
+    .package(url: "https://github.com/stephencelis/SQLite.swift.git", from: "0.15.5"),
+    .package(url: "https://github.com/marmelroy/PhoneNumberKit.git", from: "4.2.5"),
+  ],
+  targets: {
+    var targets: [Target] = [
+      .target(
+        name: "IMsgCore",
         dependencies: [
-            "IMsgCore",
-            .product(name: "Commander", package: "Commander"),
-        ],
-        exclude: [
-            "Resources/Info.plist",
+          .product(name: "SQLite", package: "SQLite.swift"),
+          .product(name: "PhoneNumberKit", package: "PhoneNumberKit"),
         ],
         linkerSettings: [
-            .unsafeFlags([
-                "-Xlinker", "-sectcreate",
-                "-Xlinker", "__TEXT",
-                "-Xlinker", "__info_plist",
-                "-Xlinker", "Sources/imsg/Resources/Info.plist",
-            ])
+          .linkedFramework("ScriptingBridge", .when(platforms: [.macOS])),
+          .linkedFramework("Contacts", .when(platforms: [.macOS])),
         ]
-    ),
-        .testTarget(
-            name: "IMsgCoreTests",
-            dependencies: [
-                "IMsgCore",
-            ]
-        ),
-        .testTarget(
-            name: "imsgTests",
-            dependencies: [
-                "imsg",
-                "IMsgCore",
+      ),
+      .executableTarget(
+        name: "imsg",
+        dependencies: [
+          "IMsgCore",
+          .product(name: "Commander", package: "Commander"),
+        ],
+        exclude: [
+          "Resources/Info.plist"
+        ],
+        linkerSettings: [
+          .unsafeFlags(
+            [
+              "-Xlinker", "-sectcreate",
+              "-Xlinker", "__TEXT",
+              "-Xlinker", "__info_plist",
+              "-Xlinker", "Sources/imsg/Resources/Info.plist",
             ],
-            exclude: [
-                "README-live.md",
-            ]
-        ),
+            .when(platforms: [.macOS])
+          )
+        ]
+      ),
     ]
+
+    #if os(macOS)
+      targets.append(contentsOf: [
+        .testTarget(
+          name: "IMsgCoreTests",
+          dependencies: [
+            "IMsgCore"
+          ]
+        ),
+        .testTarget(
+          name: "imsgTests",
+          dependencies: [
+            "imsg",
+            "IMsgCore",
+          ],
+          exclude: [
+            "README-live.md"
+          ]
+        ),
+      ])
+    #else
+      targets.append(
+        .testTarget(
+          name: "IMsgLinuxTests",
+          dependencies: [
+            "imsg",
+            "IMsgCore",
+            .product(name: "SQLite", package: "SQLite.swift"),
+          ],
+          path: "TestsLinux"
+        ))
+    #endif
+
+    return targets
+  }()
 )

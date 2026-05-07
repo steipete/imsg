@@ -14,10 +14,10 @@ help:
 		"make clean      - swift package clean"
 
 format:
-	swift format --in-place --recursive Sources Tests
+	swift format --in-place --recursive Sources Tests TestsLinux
 
 lint:
-	swift format lint --recursive Sources Tests
+	swift format lint --recursive Sources Tests TestsLinux
 	swiftlint
 
 test:
