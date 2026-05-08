@@ -9,6 +9,10 @@
 - docs: document Linux as read-only support for existing copied Messages
   databases.
 
+### Message Decoding
+- fix: strip printable typedstream length bytes from recovered `attributedBody`
+  text for 32-126 byte messages (#107, thanks @SagarSDagdu).
+
 ## 0.7.3 - 2026-05-06
 
 ### Private API Bridge
