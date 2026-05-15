@@ -6,6 +6,10 @@
 - fix: support threaded attachment replies via `send-rich --file` and
   `send-attachment --reply-to`, including the macOS 26 attachment staging
   fallback (#113, #114, thanks @omarshahine).
+- fix: `edit` now applies on macOS 14+ instead of silently no-opping. The
+  edit handler passed the chat item (not its backing `IMMessageItem`) to
+  `editMessageItem:` and passed `backwardCompatabilityText:` as a plain
+  `NSString`; both are now corrected so the IMCore selector commits the edit.
 
 ## 0.8.2 - 2026-05-11
 

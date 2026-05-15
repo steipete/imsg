@@ -2406,6 +2406,9 @@ static NSDictionary *handleEditMessage(NSInteger requestId, NSDictionary *params
     }
 
     NSAttributedString *newBody = buildPlainAttributed(newText, partIndex);
+    // backwardCompatabilityText: must be an NSAttributedString; passing a plain
+    // NSString makes editMessageItem: silently bail (no edit, no error).
+    NSAttributedString *bcBody = [[NSAttributedString alloc] initWithString:bcText];
 
     id item = findMessageItem(chat, messageGuid);
     if (!item) {
@@ -2416,17 +2419,22 @@ static NSDictionary *handleEditMessage(NSInteger requestId, NSDictionary *params
     @try {
         NSInteger localPartIndex = partIndex;
         if (gHasEditMessageItem) {
+            // editMessageItem: takes the IMMessageItem, not the chat item.
+            // findMessageItem returns an IMMessagePartChatItem; reach the
+            // backing item via -messageItem.
+            id messageItem = [item respondsToSelector:@selector(messageItem)]
+                ? [item performSelector:@selector(messageItem)] : item;
             SEL sel = @selector(editMessageItem:atPartIndex:withNewPartText:backwardCompatabilityText:);
             NSMethodSignature *sig = [chat methodSignatureForSelector:sel];
             NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
             [inv setSelector:sel];
             [inv setTarget:chat];
-            __unsafe_unretained id ci = item;
+            __unsafe_unretained id ci = messageItem;
             [inv setArgument:&ci atIndex:2];
             [inv setArgument:&localPartIndex atIndex:3];
             __unsafe_unretained NSAttributedString *newBodyArg = newBody;
             [inv setArgument:&newBodyArg atIndex:4];
-            __unsafe_unretained NSString *bcArg = bcText;
+            __unsafe_unretained NSAttributedString *bcArg = bcBody;
             [inv setArgument:&bcArg atIndex:5];
             [inv invoke];
         } else {
@@ -2449,7 +2457,7 @@ static NSDictionary *handleEditMessage(NSInteger requestId, NSDictionary *params
             [inv setArgument:&localPartIndex atIndex:3];
             __unsafe_unretained NSAttributedString *newBodyArg = newBody;
             [inv setArgument:&newBodyArg atIndex:4];
-            __unsafe_unretained NSString *bcArg = bcText;
+            __unsafe_unretained NSAttributedString *bcArg = bcBody;
             [inv setArgument:&bcArg atIndex:5];
             [inv invoke];
         }
