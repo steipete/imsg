@@ -107,21 +107,30 @@ struct LatestSentMessageQuery {
 
   init(store: MessageStore, text: String, chatID: ChatID?, since date: Date) {
     self.selection = MessageRowSelection(store: store, includeChatID: true)
+    let bodyColumn = store.schema.hasAttributedBody ? "m.attributedBody" : "NULL"
     var sql = """
       SELECT \(selection.selectList)
       FROM message m
       LEFT JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
       LEFT JOIN handle h ON m.handle_id = h.ROWID
       WHERE m.is_from_me = 1
-        AND IFNULL(m.text, '') = ?
         AND m.date >= ?
+        AND (
+          IFNULL(m.text, '') = ?
+          OR (IFNULL(m.text, '') = '' AND \(bodyColumn) IS NOT NULL)
+        )
       """
-    var bindings: [Binding?] = [text, MessageStore.appleEpoch(date)]
+    var bindings: [Binding?] = [MessageStore.appleEpoch(date), text]
     if let chatID {
       sql += " AND cmj.chat_id = ?"
       bindings.append(chatID.rawValue)
     }
-    sql += " ORDER BY m.date DESC, m.ROWID DESC LIMIT 1"
+    sql += """
+       ORDER BY CASE WHEN IFNULL(m.text, '') = ? THEN 0 ELSE 1 END,
+                m.date DESC, m.ROWID DESC
+       LIMIT 50
+      """
+    bindings.append(text)
 
     self.sql = sql
     self.bindings = bindings

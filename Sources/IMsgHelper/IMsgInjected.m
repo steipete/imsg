@@ -392,6 +392,20 @@ static NSDictionary* errorResponse(NSInteger requestId, NSString *error) {
     };
 }
 
+static NSString *serviceNameForChat(IMChat *chat, NSString *chatGuid) {
+    NSString *serviceName = nil;
+    if ([chat respondsToSelector:@selector(account)]) {
+        id account = [chat performSelector:@selector(account)];
+        if ([account respondsToSelector:@selector(serviceName)]) {
+            serviceName = [account performSelector:@selector(serviceName)];
+        }
+    }
+    if (serviceName.length) return serviceName;
+    if ([chatGuid hasPrefix:@"SMS;"]) return @"SMS";
+    if ([chatGuid hasPrefix:@"iMessage;"]) return @"iMessage";
+    return nil;
+}
+
 #pragma mark - Chat Resolution
 
 static NSArray<NSString *>* chatIdentifierPrefixes(void) {
@@ -1786,11 +1800,14 @@ static NSDictionary *handleSendMessage(NSInteger requestId, NSDictionary *params
 
         // Best-effort messageGuid; not always available immediately.
         NSString *guid = lastSentMessageGuid(chat);
-        return successResponse(requestId, @{
+        NSMutableDictionary *response = [@{
             @"chatGuid": chatGuid,
             @"messageGuid": guid ?: @"",
             @"queued": @(ddScan)
-        });
+        } mutableCopy];
+        NSString *serviceName = serviceNameForChat(chat, chatGuid);
+        if (serviceName.length) response[@"service"] = serviceName;
+        return successResponse(requestId, response);
     } @catch (NSException *exception) {
         return errorResponse(requestId,
             [NSString stringWithFormat:@"send-message failed: %@", exception.reason]);
