@@ -216,6 +216,8 @@ func rpcSendReturnsSentMessageIdentifiersWhenResolved() async throws {
   #expect(result?["ok"] as? Bool == true)
   #expect(int64Value(result?["id"]) == 1_979)
   #expect(result?["guid"] as? String == "8DF1B3D7")
+  #expect(result?["chat_guid"] as? String == "iMessage;+;chat123")
+  #expect(result?["service"] as? String == "iMessage")
 }
 
 @Test
@@ -237,6 +239,8 @@ func rpcSendKeepsOkResponseWhenSentMessageIsNotResolved() async throws {
   #expect(result?["ok"] as? Bool == true)
   #expect(result?["id"] == nil)
   #expect(result?["guid"] == nil)
+  #expect(result?["chat_guid"] as? String == "iMessage;+;chat123")
+  #expect(result?["service"] as? String == "iMessage")
 }
 
 @Test
