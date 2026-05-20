@@ -27,6 +27,12 @@ extension RPCServer {
     if let guid = data["chatGuid"] as? String, !guid.isEmpty {
       result["chat_guid"] = guid
     }
+    if let messageGUID = data["messageGuid"] as? String, !messageGUID.isEmpty {
+      result["message_guid"] = messageGUID
+    }
+    if let service = data["service"] as? String, !service.isEmpty {
+      result["service"] = service
+    }
     respond(id: id, result: result)
   }
 

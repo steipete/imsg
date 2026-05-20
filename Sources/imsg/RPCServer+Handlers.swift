@@ -245,6 +245,12 @@ extension RPCServer {
         if let guid = data["messageGuid"] as? String, !guid.isEmpty {
           result["guid"] = guid
         }
+        if let chatGuid = data["chatGuid"] as? String, !chatGuid.isEmpty {
+          result["chat_guid"] = chatGuid
+        }
+        if let service = data["service"] as? String, !service.isEmpty {
+          result["service"] = service
+        }
         respond(id: id, result: result)
         return
       } catch let err as RPCError {
@@ -280,6 +286,36 @@ extension RPCServer {
       if !sentMessage.guid.isEmpty {
         result["guid"] = sentMessage.guid
       }
+    }
+    var responseChatInfo: ChatInfo?
+    if let sentMessage {
+      responseChatInfo = try? await cache.info(chatID: sentMessage.chatID)
+    }
+    if responseChatInfo == nil, let verificationChatID {
+      responseChatInfo = try? await cache.info(chatID: verificationChatID)
+    }
+    if responseChatInfo == nil {
+      responseChatInfo = directChatInfo
+    }
+    if let chatInfo = responseChatInfo {
+      if !chatInfo.guid.isEmpty {
+        result["chat_guid"] = chatInfo.guid
+      }
+      if !chatInfo.service.isEmpty {
+        result["service"] = chatInfo.service
+      }
+    }
+    if result["chat_guid"] == nil {
+      let resolvedChatGUID =
+        !resolvedTarget.chatGUID.isEmpty ? resolvedTarget.chatGUID : (directChatInfo?.guid ?? "")
+      if !resolvedChatGUID.isEmpty {
+        result["chat_guid"] = resolvedChatGUID
+      }
+    }
+    if result["service"] == nil,
+      let directService = directChatInfo?.service, !directService.isEmpty
+    {
+      result["service"] = directService
     }
     respond(id: id, result: result)
   }

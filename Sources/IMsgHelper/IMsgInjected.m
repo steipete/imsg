@@ -244,6 +244,7 @@ static void probeSelectors(void) {
 @interface IMHandleRegistrar : NSObject
 + (instancetype)sharedInstance;
 - (id)IMHandleWithID:(NSString *)handleID;
+- (id)getIMHandlesForID:(NSString *)handleID;
 @end
 
 @interface IMChatRegistry : NSObject
@@ -390,6 +391,64 @@ static NSDictionary* errorResponse(NSInteger requestId, NSString *error) {
         @"error": error ?: @"Unknown error",
         @"timestamp": [[NSISO8601DateFormatter new] stringFromDate:[NSDate date]]
     };
+}
+
+static NSString *serviceNameForChat(IMChat *chat, NSString *chatGuid) {
+    NSString *serviceName = nil;
+    if ([chat respondsToSelector:@selector(account)]) {
+        id account = [chat performSelector:@selector(account)];
+        if ([account respondsToSelector:@selector(serviceName)]) {
+            serviceName = [account performSelector:@selector(serviceName)];
+        }
+    }
+    if (serviceName.length) return serviceName;
+    if ([chatGuid hasPrefix:@"SMS;"]) return @"SMS";
+    if ([chatGuid hasPrefix:@"iMessage;"]) return @"iMessage";
+    return nil;
+}
+
+static id firstHandleFromCandidate(id candidate, NSString *preferredService) {
+    NSMutableArray *handles = [NSMutableArray array];
+    if ([candidate isKindOfClass:[NSArray class]]) {
+        [handles addObjectsFromArray:candidate];
+    } else if ([candidate isKindOfClass:[NSSet class]]) {
+        [handles addObjectsFromArray:[candidate allObjects]];
+    } else if (candidate) {
+        [handles addObject:candidate];
+    }
+
+    for (id handle in handles) {
+        if (![handle respondsToSelector:@selector(serviceName)]) continue;
+        NSString *serviceName = [handle performSelector:@selector(serviceName)];
+        if ([serviceName isKindOfClass:[NSString class]] &&
+            [serviceName caseInsensitiveCompare:preferredService ?: @""] == NSOrderedSame) {
+            return handle;
+        }
+    }
+    return handles.firstObject;
+}
+
+static id vendIMHandle(id registrar, NSString *address, NSString *preferredService) {
+    if (!registrar || ![address isKindOfClass:[NSString class]] || address.length == 0) {
+        return nil;
+    }
+
+    @try {
+        if ([registrar respondsToSelector:@selector(IMHandleWithID:)]) {
+            id handle = [registrar performSelector:@selector(IMHandleWithID:)
+                                        withObject:address];
+            handle = firstHandleFromCandidate(handle, preferredService);
+            if (handle) return handle;
+        }
+        if ([registrar respondsToSelector:@selector(getIMHandlesForID:)]) {
+            id handles = [registrar performSelector:@selector(getIMHandlesForID:)
+                                         withObject:address];
+            return firstHandleFromCandidate(handles, preferredService);
+        }
+    } @catch (__unused NSException *ex) {
+        return nil;
+    }
+    return nil;
 }
 
 #pragma mark - Chat Resolution
@@ -1786,11 +1845,14 @@ static NSDictionary *handleSendMessage(NSInteger requestId, NSDictionary *params
 
         // Best-effort messageGuid; not always available immediately.
         NSString *guid = lastSentMessageGuid(chat);
-        return successResponse(requestId, @{
+        NSMutableDictionary *response = [@{
             @"chatGuid": chatGuid,
             @"messageGuid": guid ?: @"",
             @"queued": @(ddScan)
-        });
+        } mutableCopy];
+        NSString *serviceName = serviceNameForChat(chat, chatGuid);
+        if (serviceName.length) response[@"service"] = serviceName;
+        return successResponse(requestId, response);
     } @catch (NSException *exception) {
         return errorResponse(requestId,
             [NSString stringWithFormat:@"send-message failed: %@", exception.reason]);
@@ -2845,16 +2907,26 @@ static NSDictionary *handleCreateChat(NSInteger requestId, NSDictionary *params)
     NSArray *addresses = params[@"addresses"];
     NSString *initialMessage = params[@"message"];
     NSString *displayName = params[@"displayName"] ?: params[@"name"];
-    NSString *service = params[@"service"] ?: @"iMessage";
+    NSString *requestedService = params[@"service"] ?: @"iMessage";
+    NSString *preferredService = @"iMessage";
+    NSString *responseService = @"iMessage";
 
     if (![addresses isKindOfClass:[NSArray class]] || addresses.count == 0) {
         return errorResponse(requestId, @"Missing addresses array");
     }
-    if ([service caseInsensitiveCompare:@"iMessage"] != NSOrderedSame) {
+    if ([requestedService caseInsensitiveCompare:@"iMessage"] == NSOrderedSame) {
+        preferredService = @"iMessage";
+        responseService = @"iMessage";
+    } else if ([requestedService caseInsensitiveCompare:@"auto"] == NSOrderedSame) {
+        preferredService = @"iMessage";
+        responseService = @"iMessage";
+    } else if ([requestedService caseInsensitiveCompare:@"sms"] == NSOrderedSame) {
+        preferredService = @"SMS";
+        responseService = @"SMS";
+    } else {
         return errorResponse(requestId, [NSString stringWithFormat:
-            @"Unsupported chat-create service: %@", service]);
+            @"Unsupported chat-create service: %@", requestedService]);
     }
-    service = @"iMessage";
 
     Class hrClass = NSClassFromString(@"IMHandleRegistrar");
     id hr = hrClass ? [hrClass performSelector:@selector(sharedInstance)] : nil;
@@ -2863,7 +2935,7 @@ static NSDictionary *handleCreateChat(NSInteger requestId, NSDictionary *params)
     NSMutableArray *handles = [NSMutableArray array];
     for (NSString *addr in addresses) {
         if (![addr isKindOfClass:[NSString class]]) continue;
-        id h = [hr performSelector:@selector(IMHandleWithID:) withObject:addr];
+        id h = vendIMHandle(hr, addr, preferredService);
         if (h) [handles addObject:h];
     }
     if (handles.count == 0) {
@@ -2901,9 +2973,11 @@ static NSDictionary *handleCreateChat(NSInteger requestId, NSDictionary *params)
 
     NSString *guid = [chat respondsToSelector:@selector(guid)]
         ? [chat performSelector:@selector(guid)] : @"";
+    NSString *observedService = serviceNameForChat(chat, guid);
+    if (observedService.length) responseService = observedService;
     return successResponse(requestId, @{
         @"chatGuid": guid ?: @"",
-        @"service": service,
+        @"service": responseService,
         @"messageGuid": messageGuid ?: @"",
         @"participants": addresses
     });

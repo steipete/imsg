@@ -21,7 +21,7 @@ func rpcSendUsesBridgeWhenReadyAndExistingDirectChatResolves() async throws {
     invokeBridge: { action, params in
       capturedAction = action
       capturedParams = params
-      return ["messageGuid": "bridge-guid"]
+      return ["messageGuid": "bridge-guid", "chatGuid": "iMessage;-;+123", "service": "iMessage"]
     },
     isBridgeReady: { true }
   )
@@ -36,6 +36,8 @@ func rpcSendUsesBridgeWhenReadyAndExistingDirectChatResolves() async throws {
   let result = output.responses.first?["result"] as? [String: Any]
   #expect(result?["transport"] as? String == "bridge")
   #expect(result?["guid"] as? String == "bridge-guid")
+  #expect(result?["chat_guid"] as? String == "iMessage;-;+123")
+  #expect(result?["service"] as? String == "iMessage")
 }
 
 @Test
@@ -60,6 +62,8 @@ func rpcSendFallsBackToAppleScriptWhenAutoBridgeFails() async throws {
   #expect(captured?.recipient == "+123")
   let result = output.responses.first?["result"] as? [String: Any]
   #expect(result?["transport"] as? String == "applescript")
+  #expect(result?["chat_guid"] as? String == "iMessage;-;+123")
+  #expect(result?["service"] as? String == "iMessage")
 }
 
 @Test

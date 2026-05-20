@@ -286,45 +286,48 @@ extension MessageStore {
 
     return try withConnection { db in
       let rows = try db.prepareRowIterator(query.sql, bindings: query.bindings)
-      guard let row = try rows.failableNext() else { return nil }
-      let decoded = try decodeMessageRow(
-        row,
-        columns: query.selection.columns,
-        fallbackChatID: query.fallbackChatID
-      )
-      let replyToGUID = replyToGUID(
-        associatedGuid: decoded.associatedGUID,
-        associatedType: decoded.associatedType
-      )
-      let threadOriginatorGUID =
-        decoded.threadOriginatorGUID.isEmpty ? nil : decoded.threadOriginatorGUID
-      var parentCache: ReplyParentCache = [:]
-      let parent = enrichedReplyContext(
-        db,
-        replyToGUID: replyToGUID,
-        threadOriginatorGUID: threadOriginatorGUID,
-        cache: &parentCache
-      )
-      return Message(
-        rowID: decoded.rowID,
-        chatID: decoded.chatID,
-        sender: decoded.sender,
-        text: decoded.text,
-        date: decoded.date,
-        isFromMe: decoded.isFromMe,
-        service: decoded.service,
-        handleID: decoded.handleID,
-        attachmentsCount: decoded.attachments,
-        guid: decoded.guid,
-        routing: Message.RoutingMetadata(
+      while let row = try rows.failableNext() {
+        let decoded = try decodeMessageRow(
+          row,
+          columns: query.selection.columns,
+          fallbackChatID: query.fallbackChatID
+        )
+        guard decoded.text == text else { continue }
+        let replyToGUID = replyToGUID(
+          associatedGuid: decoded.associatedGUID,
+          associatedType: decoded.associatedType
+        )
+        let threadOriginatorGUID =
+          decoded.threadOriginatorGUID.isEmpty ? nil : decoded.threadOriginatorGUID
+        var parentCache: ReplyParentCache = [:]
+        let parent = enrichedReplyContext(
+          db,
           replyToGUID: replyToGUID,
           threadOriginatorGUID: threadOriginatorGUID,
-          destinationCallerID: decoded.destinationCallerID.isEmpty
-            ? nil : decoded.destinationCallerID,
-          replyToText: parent?.text,
-          replyToSender: parent?.sender
+          cache: &parentCache
         )
-      )
+        return Message(
+          rowID: decoded.rowID,
+          chatID: decoded.chatID,
+          sender: decoded.sender,
+          text: decoded.text,
+          date: decoded.date,
+          isFromMe: decoded.isFromMe,
+          service: decoded.service,
+          handleID: decoded.handleID,
+          attachmentsCount: decoded.attachments,
+          guid: decoded.guid,
+          routing: Message.RoutingMetadata(
+            replyToGUID: replyToGUID,
+            threadOriginatorGUID: threadOriginatorGUID,
+            destinationCallerID: decoded.destinationCallerID.isEmpty
+              ? nil : decoded.destinationCallerID,
+            replyToText: parent?.text,
+            replyToSender: parent?.sender
+          )
+        )
+      }
+      return nil
     }
   }
 

@@ -93,6 +93,37 @@ func latestSentMessageFallsBackToNewestOutgoingTextWithoutChatFilter() throws {
 }
 
 @Test
+func latestSentMessageMatchesAttributedBodyText() throws {
+  let db = try makeSentMessageDatabase()
+  let now = Date()
+  let text = "body fallback"
+  let bodyBytes = [UInt8(0x01), UInt8(0x2b)] + Array(text.utf8) + [0x86, 0x84]
+  try db.run(
+    """
+    INSERT INTO message(
+      ROWID, handle_id, text, attributedBody, guid, associated_message_guid,
+      associated_message_type, date, is_from_me, service
+    )
+    VALUES (10, 1, NULL, ?, 'body-guid', NULL, 0, ?, 1, 'iMessage')
+    """,
+    Blob(bytes: bodyBytes),
+    TestDatabase.appleEpoch(now)
+  )
+  try db.run("INSERT INTO chat_message_join(chat_id, message_id) VALUES (1, 10)")
+  let store = try MessageStore(connection: db, path: ":memory:")
+
+  let message = try store.latestSentMessage(
+    matchingText: text,
+    chatID: 1,
+    since: now.addingTimeInterval(-1)
+  )
+
+  #expect(message?.rowID == 10)
+  #expect(message?.guid == "body-guid")
+  #expect(message?.text == text)
+}
+
+@Test
 func chatInfoMatchingTargetHandlesAnyGroupPolarityMismatch() throws {
   let db = try makeSentMessageDatabase()
   try db.run(
@@ -143,6 +174,7 @@ private func makeSentMessageDatabase() throws -> Connection {
       ROWID INTEGER PRIMARY KEY,
       handle_id INTEGER,
       text TEXT,
+      attributedBody BLOB,
       guid TEXT,
       associated_message_guid TEXT,
       associated_message_type INTEGER,

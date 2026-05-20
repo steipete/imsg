@@ -84,6 +84,44 @@ func rpcMessagesHistoryIncludesChatFields() async throws {
 }
 
 @Test
+func rpcChatsCreateForwardsBridgeIdentityFields() async throws {
+  let store = try CommandTestDatabase.makeStoreForRPC()
+  let output = TestRPCOutput()
+  var capturedAction: BridgeAction?
+  var capturedParams: [String: Any] = [:]
+  let server = RPCServer(
+    store: store,
+    verbose: false,
+    output: output,
+    invokeBridge: { action, params in
+      capturedAction = action
+      capturedParams = params
+      return [
+        "chatGuid": "iMessage;+;chat987",
+        "messageGuid": "created-message-guid",
+        "service": "iMessage",
+      ]
+    }
+  )
+
+  let line =
+    #"{"jsonrpc":"2.0","id":"create","method":"chats.create","params":{"#
+    + #""addresses":["+123","+456"],"service":"auto","name":"Group","text":"hello"}}"#
+  await server.handleLineForTesting(line)
+
+  #expect(capturedAction == .createChat)
+  #expect(capturedParams["addresses"] as? [String] == ["+123", "+456"])
+  #expect(capturedParams["service"] as? String == "auto")
+  #expect(capturedParams["displayName"] as? String == "Group")
+  #expect(capturedParams["message"] as? String == "hello")
+  let result = output.responses.first?["result"] as? [String: Any]
+  #expect(result?["ok"] as? Bool == true)
+  #expect(result?["chat_guid"] as? String == "iMessage;+;chat987")
+  #expect(result?["message_guid"] as? String == "created-message-guid")
+  #expect(result?["service"] as? String == "iMessage")
+}
+
+@Test
 func rpcMessagesHistoryReportsConvertedAttachmentsWhenRequested() async throws {
   let source = FileManager.default.temporaryDirectory
     .appendingPathComponent(UUID().uuidString)
@@ -216,6 +254,8 @@ func rpcSendReturnsSentMessageIdentifiersWhenResolved() async throws {
   #expect(result?["ok"] as? Bool == true)
   #expect(int64Value(result?["id"]) == 1_979)
   #expect(result?["guid"] as? String == "8DF1B3D7")
+  #expect(result?["chat_guid"] as? String == "iMessage;+;chat123")
+  #expect(result?["service"] as? String == "iMessage")
 }
 
 @Test
@@ -237,6 +277,8 @@ func rpcSendKeepsOkResponseWhenSentMessageIsNotResolved() async throws {
   #expect(result?["ok"] as? Bool == true)
   #expect(result?["id"] == nil)
   #expect(result?["guid"] == nil)
+  #expect(result?["chat_guid"] as? String == "iMessage;+;chat123")
+  #expect(result?["service"] as? String == "iMessage")
 }
 
 @Test
